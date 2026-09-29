@@ -367,31 +367,9 @@ class TradingBot:
 
     def _learning_loop(self):
         logger.info("[learning] Loop started")
-        _last_trade_count = 0
         while not _shutdown.is_set():
             try:
-                all_trades = db.get_trades(limit=1000, book=self.book)
-                current_count = len(all_trades)
-
-                if current_count > _last_trade_count:
-                    new_trades = all_trades[:current_count - _last_trade_count]
-                    for trade in new_trades:
-                        interval  = self._get_strat_interval(trade["strategy_name"])
-                        df_latest = self._strat_dfs.get(interval)
-                        self.learning.on_trade_closed(
-                            trade_id=trade["id"],
-                            strategy_name=trade["strategy_name"],
-                            entry_price=float(trade["entry_price"]),
-                            exit_price=float(trade["exit_price"]),
-                            pnl=float(trade["pnl"]),
-                            pnl_pct=float(trade["pnl_pct"]),
-                            side=trade["side"],
-                            duration_hours=float(trade["duration_hours"]),
-                            exit_reason=trade.get("exit_reason", ""),
-                            entry_features=trade.get("entry_features", {}),
-                            df=df_latest,
-                        )
-                    _last_trade_count = current_count
+                self._journal_new_trades()
 
                 strat_dict = {s.name: s for s in self.strategies}
                 self.learning.update_performance_snapshots(strat_dict)
@@ -402,6 +380,35 @@ class TradingBot:
             except Exception as e:
                 logger.error(f"[learning] Error: {e}", exc_info=True)
             _shutdown.wait(timeout=config.LEARNING_UPDATE_INTERVAL_SEC)
+
+    def _journal_new_trades(self):
+        """
+        Feed each newly closed trade of the learning book to the journal once.
+        The last processed trade id is persisted: the old in-memory counter
+        started at 0 on every restart (re-journaling all trades) and stopped
+        seeing new trades once 1000 existed.
+        """
+        key = f"journal:last_trade_id:{self.book}"
+        last_id = int(db.get_meta(key) or 0)
+        new_trades = sorted((t for t in db.get_trades(limit=100_000, book=self.book)
+                             if t["id"] > last_id), key=lambda t: t["id"])
+        for trade in new_trades:
+            interval  = self._get_strat_interval(trade["strategy_name"])
+            df_latest = self._strat_dfs.get(interval)
+            self.learning.on_trade_closed(
+                trade_id=trade["id"],
+                strategy_name=trade["strategy_name"],
+                entry_price=float(trade["entry_price"]),
+                exit_price=float(trade["exit_price"]),
+                pnl=float(trade["pnl"]),
+                pnl_pct=float(trade["pnl_pct"]),
+                side=trade["side"],
+                duration_hours=float(trade["duration_hours"]),
+                exit_reason=trade.get("exit_reason", ""),
+                entry_features=trade.get("entry_features", {}),
+                df=df_latest,
+            )
+            db.set_meta(key, str(trade["id"]))
 
     # ─── Balance snapshot loop ────────────────────────────────────────────────
 
