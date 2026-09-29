@@ -229,14 +229,17 @@ class StrategyEvaluator:
 
     # ─── Gate used by the trading loop ───────────────────────────────────────
 
-    def can_trade(self, strat: BaseStrategy, side: SignalType, df: pd.DataFrame) -> Tuple[bool, str]:
+    def can_trade(self, strat: BaseStrategy, side: SignalType, df: pd.DataFrame,
+                  allowed_statuses=("VIABLE", "CONDICIONAL")) -> Tuple[bool, str]:
+        """allowed_statuses comes from the aggressiveness (risk_engine.profile);
+        a DESCARTADA strategy never trades."""
         st = db.get_strategy_status(strat.name)
         if st is None:
             return False, "evaluator: sin evaluar todavia"
         if st["status"] == "DESCARTADA":
             return False, "evaluator: DESCARTADA (valor 0)"
-        if st["status"] == "EN_PRUEBA":
-            return False, "evaluator: EN_PRUEBA"
+        if st["status"] not in allowed_statuses:
+            return False, f"evaluator: {st['status']} (no permitido con esta agresividad)"
         side_name = "LONG" if side == SignalType.BUY else "SHORT"
         if side_name not in st["allowed_sides"]:
             return False, f"evaluator: {side_name} bloqueado"

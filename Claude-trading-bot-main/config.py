@@ -32,6 +32,16 @@ MAX_STRATEGIES     = 7
 CANDLE_INTERVAL    = "1h"
 LOOKBACK_CANDLES   = 600   # candles kept in memory per strategy interval
 
+# ─── Risk engine (risk_engine.py) — defaults; editable from the dashboard ─────
+# INITIAL_CAPITAL is the paper account ("funds"). RISK_BUDGET is the most the
+# bot may use (default 10% of the funds, e.g. 100 of 1000).
+# RISK_AGGRESSIVENESS 1 (prudent) .. 10 (aggressive).
+RISK_BUDGET         = float(os.getenv("RISK_BUDGET") or 0) or INITIAL_CAPITAL * 0.10
+RISK_AGGRESSIVENESS = int(os.getenv("RISK_AGGRESSIVENESS", "5"))
+RISK_MODE           = os.getenv("RISK_MODE", "trade")          # trade | close_only
+RISK_ALLOW_SHORT    = os.getenv("RISK_ALLOW_SHORT", "true").lower() == "true"
+MIN_ORDER_USD       = 5.0     # Binance BTCUSDT minimum notional
+
 # ─── Risk Management ───────────────────────────────────────────────────────────
 DEFAULT_STOP_LOSS_PCT              = 0.025   # 2.5%
 DEFAULT_TAKE_PROFIT_PCT            = 0.055   # 5.5%

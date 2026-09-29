@@ -32,7 +32,9 @@ class PortfolioManager:
                  strategies: List[BaseStrategy],
                  book: str = "main",
                  simulate_fills: bool = False,
-                 clock: Optional[Callable[[], str]] = None):
+                 clock: Optional[Callable[[], str]] = None,
+                 capital_base: Optional[float] = None,
+                 risk_engine=None):
         """
         book           : paper book this manager trades in ('main', 'observe',
                          'baseline'); positions/trades/balances are kept per book.
@@ -40,11 +42,18 @@ class PortfolioManager:
                          client (observation mode, baseline shadows, replay).
         clock          : returns the current time as ISO string (replay injects
                          the historical candle time); defaults to real UTC now.
+        capital_base   : capital split among the strategies (default
+                         INITIAL_CAPITAL); the learning book uses the risk budget.
+        risk_engine    : RiskEngine that sizes positions and gates entries; the
+                         strategies then share one pool (the budget), so a
+                         strategy's free capital may go below zero.
         """
         self.client      = client
         self.strategies  = {s.name: s for s in strategies}
         self.book        = book
         self.simulate_fills = simulate_fills
+        self.capital_base = capital_base
+        self.risk_engine = risk_engine
         self._clock      = clock or utc_now_iso
         self._lock       = threading.Lock()
 
@@ -63,7 +72,8 @@ class PortfolioManager:
         """
         active  = [s for s in self.strategies.values() if s.is_active]
         n       = max(len(active), 1)
-        share   = config.INITIAL_CAPITAL / n
+        base    = self.capital_base if self.capital_base is not None else config.INITIAL_CAPITAL
+        share   = base / n
         for strat in active:
             # Reconstruct true capital from first principles:
             #   total_cap = initial share + realized P&L + unrealized P&L
@@ -87,7 +97,9 @@ class PortfolioManager:
 
             # Total capital includes both realized and unrealized gains
             total_cap = share + realized + unrealized
-            free_cap = max(total_cap - committed, 0)
+            free_cap = total_cap - committed
+            if self.risk_engine is None:
+                free_cap = max(free_cap, 0)   # pooled budget: may be negative
 
             self._capital[strat.name]      = free_cap
             self._peak_capital[strat.name] = total_cap   # peak tracks total, not free
@@ -105,6 +117,20 @@ class PortfolioManager:
     def reallocate(self, current_price: float = 0.0):
         """Re-balance capital from strategies that are inactive or over-limit."""
         self._allocate_capital(current_price)
+
+    def set_capital_base(self, capital_base: float, current_price: float = 0.0):
+        """Budget changed (dashboard): re-split it; realized/unrealized P&L is kept."""
+        with self._lock:
+            self.capital_base = capital_base
+            self._allocate_capital(current_price)
+
+    def close_all_positions(self, current_price: float, reason: str = "MANUAL_CLOSE_ALL") -> int:
+        """Close every open position of this book at the current price."""
+        positions = [p for p in db.get_open_positions(book=self.book)
+                     if p["strategy_name"] in self.strategies]
+        for pos in positions:
+            self._close_position(pos, current_price, reason)
+        return len(positions)
 
     def _sync_capital_row(self, strat_name: str, capital: float):
         # The strategies table (dashboard) describes the main book only.
@@ -164,24 +190,32 @@ class PortfolioManager:
                           current_price: float, ml_confidence: float) -> tuple:
         """Returns (placed: bool, reason: str). Caller holds self._lock."""
         strat_name = strategy.name
-        # ── Risk checks ───────────────────────────────────────────────────
-        if not self._risk_check(strat_name, signal, ml_confidence, current_price):
-            return False, "risk_check"
-
         open_positions = db.get_open_positions(strat_name, book=self.book)
         if len(open_positions) >= config.MAX_OPEN_POSITIONS_PER_STRATEGY:
             logger.debug(f"{strat_name}: max open positions reached")
             return False, "max_open_positions"
 
-        capital = self._capital.get(strat_name, 0.0)
-        if capital < 50:
-            logger.warning(f"{strat_name}: insufficient capital (${capital:.2f})")
-            return False, "insufficient_capital"
+        if self.risk_engine is not None:
+            # Budget book: the risk engine checks limits and sizes the position.
+            ok, reason, notional = self.risk_engine.check_entry(
+                strategy, signal, current_price, ml_confidence, self)
+            if not ok:
+                return False, reason
+            quantity = round(notional / current_price, 6)
+        else:
+            # ── Risk checks ───────────────────────────────────────────────
+            if not self._risk_check(strat_name, signal, ml_confidence, current_price):
+                return False, "risk_check"
 
-        # ── Position sizing ───────────────────────────────────────────────
-        quantity, notional = self._size_position(
-            capital, current_price, signal, ml_confidence
-        )
+            capital = self._capital.get(strat_name, 0.0)
+            if capital < 50:
+                logger.warning(f"{strat_name}: insufficient capital (${capital:.2f})")
+                return False, "insufficient_capital"
+
+            # ── Position sizing ───────────────────────────────────────────
+            quantity, notional = self._size_position(
+                capital, current_price, signal, ml_confidence
+            )
         if quantity <= 0:
             return False, "zero_size"
 
