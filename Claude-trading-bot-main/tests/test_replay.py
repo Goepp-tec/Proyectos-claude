@@ -51,7 +51,7 @@ def test_replay_runs_both_books_offline_and_keeps_baseline_frozen(tmp_path, monk
          patch("requests.post", side_effect=AssertionError("network")):
         res = run_replay(data, start, end, db_path=str(tmp_path / "replay.db"))
 
-    for book in ("learn", "baseline"):
+    for book in ("learn", "tuned", "baseline"):
         m = res["metrics"][book]
         assert m["equity_start"] == pytest.approx(config.INITIAL_CAPITAL)
         assert len(res["equity"][book]) == 20 * 24

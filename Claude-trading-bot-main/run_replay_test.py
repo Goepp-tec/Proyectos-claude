@@ -38,6 +38,7 @@ import database as db
 
 DELTA = {"1h": pd.Timedelta(hours=1), "4h": pd.Timedelta(hours=4), "1d": pd.Timedelta(days=1)}
 LEARN_BOOK = "observe"   # the learning strategies' book, as in live observation mode
+TUNED_BOOK = "tuned"     # replay only: tuned params + fixed ML confidence
 
 logger = logging.getLogger("replay")
 
@@ -116,6 +117,9 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
     bot.portfolio = main.make_portfolio(None, learners, LEARN_BOOK, clock=iso_clock)
     bot.baseline_portfolio = main.make_portfolio(None, baselines, "baseline", clock=iso_clock)
     bot.learning = LearningEngine({s.name: s for s in learners})
+    # Replay-only 'tuned' book: the learners' (tuned) params with the baseline's
+    # fixed ML confidence — isolates the effect of the parameter changes.
+    tuned_pm = main.make_portfolio(None, learners, TUNED_BOOK, clock=iso_clock)
 
     def history(interval, days, now):
         df = data[interval]
@@ -130,8 +134,9 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
     close_times = {iv: data[iv].index + DELTA[iv] for iv in ("4h", "1d")}
     last_closed = {iv: -1 for iv in close_times}
     hours = data["1h"][(data["1h"].index >= start) & (data["1h"].index < end)]
-    equity = {"learn": [], "baseline": []}
-    books = (("learn", bot.portfolio, learners), ("baseline", bot.baseline_portfolio, baselines))
+    equity = {"learn": [], "tuned": [], "baseline": []}
+    books = (("learn", bot.portfolio, learners), ("tuned", tuned_pm, learners),
+             ("baseline", bot.baseline_portfolio, baselines))
     t0 = time.time()
 
     for i, (ts, row) in enumerate(hours.iterrows()):
@@ -141,8 +146,8 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
                   for lvl in (p["stop_loss"], p["take_profit"]) if lvl]
         for price in intrabar_path(row["open"], row["high"], row["low"], row["close"], levels):
             bot._current_price = price
-            bot.portfolio.check_open_positions(price)
-            bot.baseline_portfolio.check_open_positions(price)
+            for _, pm, _ in books:
+                pm.check_open_positions(price)
 
         # 2. Hour closed: new 4h / 1d candles → signals at the close price
         now, price = ts + DELTA["1h"], float(row["close"])
@@ -158,6 +163,9 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
             bot._process_signals([s for s in learners if s.candle_interval in changed],
                                  bot.portfolio, price,
                                  lambda name, df: bot.learning.get_confidence(name, df))
+            bot._process_signals([s for s in learners if s.candle_interval in changed],
+                                 tuned_pm, price,
+                                 lambda name, df: config.BASELINE_ML_CONFIDENCE)
             bot._process_signals([b for b in baselines if b.candle_interval in changed],
                                  bot.baseline_portfolio, price,
                                  lambda name, df: config.BASELINE_ML_CONFIDENCE)
@@ -180,6 +188,7 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
     idx = hours.index + DELTA["1h"]
     metrics = {
         "learn": _metrics(pd.Series(equity["learn"], index=idx), LEARN_BOOK),
+        "tuned": _metrics(pd.Series(equity["tuned"], index=idx), TUNED_BOOK),
         "baseline": _metrics(pd.Series(equity["baseline"], index=idx), "baseline"),
     }
     return {
@@ -230,7 +239,7 @@ def _reason_category(reason: str) -> str:
     return reason
 
 def build_report(res: dict, data_source: str) -> str:
-    L, B = res["metrics"]["learn"], res["metrics"]["baseline"]
+    L, T, B = res["metrics"]["learn"], res["metrics"]["tuned"], res["metrics"]["baseline"]
     audit = db.get_learning_audit(limit=10**6)
     counts = {d: sum(r["decision"] == d for r in audit) for d in ("applied", "rejected", "rollback")}
     rows = [
@@ -252,24 +261,30 @@ def build_report(res: dict, data_source: str) -> str:
     w(f"BTC buy & hold  : {res['btc_return']:+.2%} en el mismo periodo (referencia)")
     w(f"Duracion calculo: {res['elapsed_sec'] / 60:.1f} min")
     w("")
-    w(f"{'Metrica':<34}{'APRENDE':>16}{'BASELINE':>16}")
-    w("-" * 66)
-    for label, fmt, key in rows:
-        w(f"{label:<34}{fmt.format(L[key]):>16}{fmt.format(B[key]):>16}")
+    w("APRENDE      = parametros del tuner + confianza ML adaptativa (lo que corre en vivo)")
+    w("SOLO AJUSTES = parametros del tuner + confianza fija 0.55 (aisla el efecto de los ajustes)")
+    w("BASELINE     = parametros por defecto congelados + confianza fija 0.55")
     w("")
-    diff = L["equity_end"] - B["equity_end"]
-    better = diff > 0 and L["max_drawdown"] <= B["max_drawdown"] + 0.02
-    w(f"Diferencia de equity final (aprende - baseline): ${diff:+,.2f}")
-    if better:
-        w("CONCLUSION: en este replay el aprendizaje SUPERO al baseline.")
-    else:
-        w("CONCLUSION: en este replay el aprendizaje NO supero al baseline.")
+    w(f"{'Metrica':<34}{'APRENDE':>15}{'SOLO AJUSTES':>15}{'BASELINE':>15}")
+    w("-" * 79)
+    for label, fmt, key in rows:
+        w(f"{label:<34}{fmt.format(L[key]):>15}{fmt.format(T[key]):>15}{fmt.format(B[key]):>15}")
+    w("")
+    for name, M in (("Aprende", L), ("Solo ajustes", T)):
+        diff = M["equity_end"] - B["equity_end"]
+        better = diff > 0 and M["max_drawdown"] <= B["max_drawdown"] + 0.02
+        verdict = "SUPERO" if better else "NO supero"
+        w(f"{name:<13} vs baseline: equity {diff:+,.2f} USD -> {verdict} al baseline.")
+        if B["trades"] and M["trades"] < 0.5 * B["trades"]:
+            w(f"  OJO: hizo {M['trades']} trades vs {B['trades']} del baseline; la diferencia se")
+            w("  explica sobre todo por operar menos, no por operar mejor.")
     w("")
     w("EQUITY FINAL POR ESTRATEGIA")
-    w(f"{'Estrategia':<24}{'Aprende':>14}{'Baseline':>14}{'Diferencia':>14}")
+    w(f"{'Estrategia':<24}{'Aprende':>12}{'Solo ajust.':>12}{'Baseline':>12}")
     for name, eq_l in res["per_strategy"]["learn"].items():
+        eq_t = res["per_strategy"]["tuned"][name]
         eq_b = res["per_strategy"]["baseline"][name]
-        w(f"{name:<24}{eq_l:>14,.2f}{eq_b:>14,.2f}{eq_l - eq_b:>+14,.2f}")
+        w(f"{name:<24}{eq_l:>12,.2f}{eq_t:>12,.2f}{eq_b:>12,.2f}")
     w("")
     w(f"APRENDIZAJE: {len(audit)} propuestas -> {counts['applied']} aplicadas, "
       f"{counts['rejected']} rechazadas, {counts['rollback']} revertidas (rollback)")
@@ -301,9 +316,10 @@ def build_report(res: dict, data_source: str) -> str:
     w("- SL/TP se simulan con un recorrido intra-hora (apertura->min/max->cierre);")
     w("  el orden real dentro de la hora puede diferir. Fills simulados con")
     w(f"  slippage {config.SLIPPAGE:.2%} y fee {config.TRADING_FEE:.1%}; sin spread real ni latencia.")
-    w("- Diferencias aprende/baseline vienen de (a) cambios de parametros del tuner y")
-    w("  (b) la confianza ML del libro que aprende (win rate reciente, rachas), que")
-    w("  ajusta el tamano y puede filtrar entradas; el baseline usa confianza fija 0.55.")
+    w("- Aprende vs Solo ajustes = efecto de la confianza ML (win rate reciente y rachas:")
+    w("  ajusta el tamano y pausa entradas). Solo ajustes vs Baseline = efecto de los")
+    w("  cambios de parametros. 'Solo ajustes' comparte instancias de estrategia con")
+    w("  'Aprende' (mismos parametros en cada momento); existe solo en el replay.")
     w("- Profit factor y win rate con pocos trades no son estadisticamente fiables.")
     w("- Indicadores calculados una vez sobre toda la historia (en vivo: sobre la")
     w("  ventana de 600 velas); diferencias minimas en EMAs largas.")
@@ -317,10 +333,14 @@ def main_cli():
     ap.add_argument("--no-learning", action="store_true", help="disable the tuner (sanity check)")
     args = ap.parse_args()
 
+    import main   # noqa: F401 — its import installs console/file log handlers; override below
+
     os.makedirs(args.out, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
     log_path = os.path.join(args.out, f"replay_{stamp}.log")
     root = logging.getLogger()
+    for h in root.handlers:
+        h.close()
     file_handler = logging.FileHandler(log_path, encoding="utf-8")
     file_handler.setFormatter(logging.Formatter("%(levelname)-7s %(name)s — %(message)s"))
     root.handlers = [file_handler]
@@ -344,8 +364,7 @@ def main_cli():
     report_path = os.path.join(args.out, f"REPLAY_REPORT_{stamp}.txt")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report + "\n")
-    pd.DataFrame({"learn": res["equity"]["learn"], "baseline": res["equity"]["baseline"]},
-                 index=res["index"]).to_csv(os.path.join(args.out, f"replay_equity_{stamp}.csv"))
+    pd.DataFrame(res["equity"], index=res["index"]).to_csv(os.path.join(args.out, f"replay_equity_{stamp}.csv"))
     print("\n" + report)
     print(f"\nReporte: {report_path}\nBase de datos: {db_path}\nLog: {log_path}")
 
