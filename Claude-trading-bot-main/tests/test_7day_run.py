@@ -75,6 +75,18 @@ def test_hourly_snapshots_per_book_and_strategy(run):
     assert total["drawdown_pct"] == 0.0
 
 
+def test_snapshots_include_the_lab_book_when_present(run):
+    bot = _bot()
+    lab = [_strategy("A"), _strategy("B")]
+    bot.lab, bot.lab_portfolio = lab, PortfolioManager(Mock(), lab, book="lab", simulate_fills=True)
+    run.start_or_resume(T0)
+    run.snapshot(T0, bot)
+    books = {r["book"] for r in run.snapshots()}
+    assert books == {"observe", "baseline", "lab"}
+    text = run.report(T0 + timedelta(hours=1), bot.book)
+    assert "LAB" in text and "mismo capital" in text
+
+
 def test_daily_csv_export(run):
     bot = _bot()
     run.start_or_resume(T0)

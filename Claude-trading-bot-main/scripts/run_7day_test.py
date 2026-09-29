@@ -144,8 +144,11 @@ class TestRun:
         audit = [r for r in db.get_learning_audit(limit=10**6) if r["ts"] >= since]
         learning = {d: sum(r["decision"] == d for r in audit) for d in ("applied", "rejected", "rollback")}
         conn = db.get_conn()
-        for book, pm, strats in ((bot.book, bot.portfolio, bot.strategies),
-                                 ("baseline", bot.baseline_portfolio, bot.baselines)):
+        books = [(bot.book, bot.portfolio, bot.strategies),
+                 ("baseline", bot.baseline_portfolio, bot.baselines)]
+        if getattr(bot, "lab_portfolio", None) is not None:   # same line-up, ungated
+            books.append(("lab", bot.lab_portfolio, bot.lab))
+        for book, pm, strats in books:
             totals = dict(equity=0.0, free=0.0, open=0, closed=0, realized=0.0, unreal=0.0)
             for s in strats:
                 if not s.is_active:
@@ -267,11 +270,19 @@ class TestRun:
                 ("Max drawdown (snapshots)", "{:.2%}", "max_drawdown"),
                 ("Trades cerrados", "{:d}", "trades"), ("Profit factor", "{:.2f}", "profit_factor"),
                 ("Win rate", "{:.1%}", "win_rate"), ("Fees pagadas", "${:,.2f}", "fees")]
-        w(f"{'Metrica':<28}{'APRENDE':>16}{'BASELINE':>16}")
-        w("-" * 60)
+        has_lab = any(r["book"] == "lab" for r in self.snapshots())
+        X = self.book_metrics("lab") if has_lab else None
+        w(f"{'Metrica':<28}{'APRENDE':>16}{'BASELINE':>16}" + (f"{'LAB':>16}" if has_lab else ""))
+        w("-" * (76 if has_lab else 60))
         for name, fmt, key in rows:
-            w(f"{name:<28}{fmt.format(L[key]):>16}{fmt.format(B[key]):>16}")
+            w(f"{name:<28}{fmt.format(L[key]):>16}{fmt.format(B[key]):>16}"
+              + (f"{fmt.format(X[key]):>16}" if has_lab else ""))
         w(f"Aprende - baseline (equity final): ${L['equity_end'] - B['equity_end']:+,.2f}")
+        if has_lab:
+            w(f"Aprende - lab (equity final):      ${L['equity_end'] - X['equity_end']:+,.2f}")
+            w("  Comparacion justa del evaluador = APRENDE vs LAB: mismas estrategias,")
+            w("  mismo capital por estrategia; la unica diferencia es el filtro. El baseline")
+            w("  reparte el capital entre 8 estrategias (posiciones ~2x mas grandes).")
         w("")
         final = {}
         for r in self.snapshots():
