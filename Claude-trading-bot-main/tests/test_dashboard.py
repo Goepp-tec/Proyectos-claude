@@ -48,6 +48,23 @@ def test_learning_tab_renders_audit_and_learner_vs_baseline(temp_db):
         assert text in html_out, text
 
 
+def test_strategies_tab_shows_status_regimes_and_sources(temp_db):
+    from dashboard import app as dash_app
+    metrics = {"trades": 120, "profit_factor": 0.86, "profitable_windows": 0, "windows": 4,
+               "worst_drawdown": 0.09, "by_regime": {"RANGING": {"trades": 60, "profit_factor": 0.8}},
+               "by_side": {}, "live": {"trades": 3, "pnl": -4.2, "profit_factor": 0.5}}
+    db.upsert_strategy_status("Breakout", "DESCARTADA", 0.0, [], [], "pierde de forma consistente", metrics)
+    db.upsert_strategy_status("Turtle_Breakout", "CONDICIONAL", 0.64, ["RANGING"], ["LONG", "SHORT"],
+                              "funciona en: lateral",
+                              {**metrics, "profit_factor": 1.5,
+                               "by_regime": {"RANGING": {"trades": 14, "profit_factor": 2.1}}})
+    out = _dump(dash_app._render_strategy_evaluation())
+    for text in ("Breakout", "DESCARTADA", "Turtle_Breakout", "CONDICIONAL", "lateral",
+                 "Way of the Turtle", "pierde de forma consistente"):
+        assert text in out, text
+    assert "tab-evaluation" in _dump(dash_app.app.layout)
+
+
 def test_learning_tab_is_registered():
     from dashboard import app as dash_app
     assert "tab-learning" in _dump(dash_app.app.layout)

@@ -130,6 +130,7 @@ app.layout = dbc.Container(fluid=True, style={"backgroundColor": COLORS["bg"],
         dbc.Tab(label="Trade History",         tab_id="tab-history"),
         dbc.Tab(label="Trade Journal",         tab_id="tab-journal"),
         dbc.Tab(label="Aprendizaje",           tab_id="tab-learning"),
+        dbc.Tab(label="Estrategias",           tab_id="tab-evaluation"),
     ]),
 
     html.Div(id="tab-content", style={"padding": "12px 12px 30px"}),
@@ -249,6 +250,8 @@ def render_tab(active_tab, _):
         return _render_journal()
     elif active_tab == "tab-learning":
         return _render_learning()
+    elif active_tab == "tab-evaluation":
+        return _render_strategy_evaluation()
     return html.Div("Select a tab")
 
 
@@ -774,6 +777,103 @@ def _render_learning():
         _table(audit_rows, conditional=decision_colors) if audit_rows else html.Div(
             "Todavía no hay propuestas. El aprendizaje corre cada "
             f"{config.LEARNING_INTERVAL_HOURS:g} h.", style={"color": COLORS["subtext"]}),
+    ])
+
+
+STATUS_STYLE = {
+    "VIABLE":      ("✅ VIABLE", "green"),
+    "CONDICIONAL": ("🟡 CONDICIONAL", "yellow"),
+    "EN_PRUEBA":   ("🔍 EN PRUEBA", "blue"),
+    "DESCARTADA":  ("⛔ DESCARTADA", "red"),
+}
+
+
+def _render_strategy_evaluation():
+    """Strategy evaluator: viability, when (market regime) and how (side) per strategy."""
+    from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES
+    from strategy_evaluator import REGIMES, REGIME_ES
+
+    catalog = {S().name: ("registrada", S) for S in ALL_STRATEGIES}
+    catalog.update({S().name: ("catálogo", S) for S in CANDIDATE_STRATEGIES})
+    statuses = db.get_all_strategy_status()
+    if not statuses:
+        return html.Div("El evaluador todavía no calificó ninguna estrategia (corre cada "
+                        f"{config.EVAL_INTERVAL_HOURS:g} h, la primera vez al arrancar).",
+                        style={"color": COLORS["subtext"], "padding": "20px"})
+
+    counts = {k: sum(s["status"] == k for s in statuses) for k in STATUS_STYLE}
+    cards = dbc.Row([
+        dbc.Col(_metric_card(label, str(counts[key]), color), width=3)
+        for key, (label, color) in STATUS_STYLE.items()
+    ], className="g-2 mb-3")
+
+    ordered = sorted(statuses, key=lambda s: -s["score"])
+    fig_score = go.Figure(go.Bar(
+        x=[s["strategy_name"] for s in ordered], y=[s["score"] for s in ordered],
+        marker_color=[COLORS[STATUS_STYLE[s["status"]][1]] for s in ordered],
+        text=[STATUS_STYLE[s["status"]][0].split(" ", 1)[1] for s in ordered],
+    ))
+    fig_score.update_layout(**_dark_layout("Puntaje de viabilidad (0 = descartada)"), height=300,
+                            yaxis_range=[0, 1])
+
+    # "When": profit factor per market regime (text = trades)
+    z, text = [], []
+    for s in ordered:
+        row_z, row_t = [], []
+        for r in REGIMES:
+            st = s["metrics"].get("by_regime", {}).get(r)
+            row_z.append(min(st["profit_factor"], 3.0) if st and st["trades"] else None)
+            row_t.append(f"PF {st['profit_factor']:.2f}<br>{st['trades']} trades" if st and st["trades"] else "-")
+        z.append(row_z)
+        text.append(row_t)
+    fig_regime = go.Figure(go.Heatmap(
+        z=z, x=[REGIME_ES[r] for r in REGIMES], y=[s["strategy_name"] for s in ordered],
+        text=text, texttemplate="%{text}", zmin=0.5, zmax=1.5, zmid=1.0,
+        colorscale=[[0, COLORS["red"]], [0.5, COLORS["card"]], [1, COLORS["green"]]],
+        colorbar=dict(title="PF"),
+    ))
+    fig_regime.update_layout(**_dark_layout("¿Cuándo funciona? Profit factor por tipo de mercado "
+                                            "(backtest walk-forward)"), height=60 + 28 * len(ordered))
+
+    rows = []
+    for s in ordered:
+        m = s["metrics"]
+        live = m.get("live", {})
+        origin, S = catalog.get(s["strategy_name"], ("?", None))
+        rows.append({
+            "Estrategia": s["strategy_name"],
+            "Origen": origin,
+            "Estado": STATUS_STYLE[s["status"]][0],
+            "Puntaje": f"{s['score']:.2f}",
+            "Trades (hist.)": m.get("trades", 0),
+            "PF": f"{m.get('profit_factor', 0):.2f}",
+            "Ventanas rentables": f"{m.get('profitable_windows', 0)}/{m.get('windows', 0)}",
+            "Peor DD": f"{m.get('worst_drawdown', 0):.1%}",
+            "Opera en": ", ".join(REGIME_ES.get(r, r) for r in s["allowed_regimes"]) or "—",
+            "Lados": ", ".join(s["allowed_sides"]) or "—",
+            "Lab en vivo": f"{live.get('trades', 0)} trades, ${live.get('pnl', 0):+,.2f}",
+            "Motivo": s["reason"] or "",
+            "Fuente": (S.SOURCE if S is not None else "") or "estrategia registrada del bot",
+            "Evaluada": (s["updated_at"] or "")[:16].replace("T", " "),
+        })
+    status_colors = [
+        {"if": {"filter_query": '{Estado} contains "DESCARTADA"'}, "color": COLORS["red"]},
+        {"if": {"filter_query": '{Estado} contains "VIABLE"'}, "color": COLORS["green"]},
+        {"if": {"filter_query": '{Estado} contains "CONDICIONAL"'}, "color": COLORS["yellow"]},
+    ]
+    return html.Div([
+        dbc.Alert(
+            "El evaluador califica cada estrategia con backtests en 4 ventanas de "
+            f"{config.EVAL_WINDOW_DAYS} días, por tipo de mercado y por dirección, más sus trades en "
+            "vivo del libro 'lab'. La versión que aprende solo opera VIABLES, o CONDICIONALES en su "
+            "tipo de mercado. DESCARTADA = valor 0: no se vuelve a evaluar ni a operar. "
+            "Es evidencia histórica, no garantía.",
+            color="secondary", style={"fontSize": "13px"}),
+        cards,
+        dcc.Graph(figure=fig_score, config={"displayModeBar": False}),
+        dcc.Graph(figure=fig_regime, config={"displayModeBar": False}),
+        html.H6("Detalle por estrategia", style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
+        _table(rows, page_size=20, conditional=status_colors),
     ])
 
 
