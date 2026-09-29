@@ -69,3 +69,21 @@ def test_small_equity_drawdown_does_not_trigger_guard(pm):
     dip_price = entry * 0.99   # ~0.3% equity loss
     assert pm.process_signal(pm.strategies["RiskTest"], _buy(dip_price),
                              dip_price, ml_confidence=0.6)
+
+
+@pytest.mark.parametrize("with_risk_engine", [False, True])
+def test_reserved_capital_matches_the_rounded_quantity(temp_db, monkeypatch, with_risk_engine):
+    """The quantity is rounded (5-6 decimals) but the unrounded notional was taken
+    from free capital: equity drifted by a few cents on every entry."""
+    from risk_engine import RiskEngine, RiskSettings
+    monkeypatch.setattr(config, "INITIAL_CAPITAL", 1_000.0)
+    kw = {}
+    if with_risk_engine:
+        RiskSettings(funds=1_000, budget=100, aggressiveness=5).save()
+        kw = dict(capital_base=100, risk_engine=RiskEngine("main"))
+    pm = PortfolioManager(_client(), [_strategy("R")], **kw)
+    price = 63_217.37
+    before = pm.strategy_equity("R", price)
+    signal = Signal(SignalType.BUY, 0.7, stop_loss=price * 0.95, take_profit=price * 1.1)
+    assert pm.process_signal(pm.strategies["R"], signal, price, 0.6)
+    assert pm.strategy_equity("R", price) == pytest.approx(before, abs=1e-9)

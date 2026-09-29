@@ -245,6 +245,9 @@ class PortfolioManager:
             )
         if quantity <= 0:
             return False, "zero_size"
+        # Reserve exactly what the rounded quantity is worth: the unrounded
+        # notional made equity drift by up to ~0.3 USD on every entry.
+        notional = quantity * current_price
 
         # ── Place order ───────────────────────────────────────────────────
         symbol = symbol_of(strategy)
