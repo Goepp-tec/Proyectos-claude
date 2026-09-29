@@ -15,6 +15,8 @@ from .classic_catalog import (TurtleBreakoutStrategy, ConnorsRSI2Strategy, Bolli
                               SupertrendStrategy, GoldenCross50200Strategy)
 from .modern_catalog import (FearGreedContrarianStrategy, FundingContrarianStrategy,
                              TopTradersFollowStrategy, CrowdVsTopTradersStrategy, CarverEWMACStrategy)
+from .smart_money_catalog import (SmartMoneyConsensusStrategy, HLTopWalletsFollowStrategy,
+                                  COTInstitutionalStrategy)
 
 ALL_STRATEGIES = [
     EMA5MomentumStrategy,           # 1 – Short-window EMA momentum     (~145% CAGR)
@@ -46,4 +48,8 @@ CANDIDATE_STRATEGIES = [
     TopTradersFollowStrategy,       # follow Binance top traders' position build-ups
     CrowdVsTopTradersStrategy,      # fade the crowd when top traders disagree
     CarverEWMACStrategy,            # Carver, Systematic Trading: EWMAC 16/64
+    # Top traders beyond Binance: OKX, Hyperliquid on-chain wallets, CME (CFTC COT)
+    SmartMoneyConsensusStrategy,    # Binance + OKX + Hyperliquid top traders agree
+    HLTopWalletsFollowStrategy,     # follow Hyperliquid's most profitable wallets
+    COTInstitutionalStrategy,       # Larry Williams' COT index on CME asset managers
 ]

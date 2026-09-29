@@ -337,6 +337,18 @@ STRATEGY_PARAMS = {
         "fast_period": 16, "threshold": 10, "atr_sl_mult": 2.0, "atr_tp_mult": 4.0,
         "candle_interval": "1d",
     },
+    "SmartMoney_Consensus": {
+        "z_entry": 1.0, "lookback": 72, "hl_net_min": 0.3, "atr_sl_mult": 1.5, "atr_tp_mult": 3.0,
+        "candle_interval": "1h",
+    },
+    "HL_TopWallets_Follow": {
+        "net_entry": 0.4, "swing": 0.25, "swing_hours": 6, "atr_sl_mult": 1.5, "atr_tp_mult": 3.0,
+        "candle_interval": "1h",
+    },
+    "COT_Institucional": {
+        "weeks": 26, "index_high": 80, "index_low": 20, "atr_sl_mult": 2.0, "atr_tp_mult": 4.0,
+        "candle_interval": "1d",
+    },
 }
 
 
