@@ -206,6 +206,20 @@ def set_live_since():
         """, (utc_now_iso(),))
         conn.commit()
 
+def get_meta(key: str) -> Optional[str]:
+    row = get_conn().execute("SELECT value FROM bot_metadata WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def set_meta(key: str, value: str):
+    conn = get_conn()
+    conn.execute("""
+        INSERT OR REPLACE INTO bot_metadata (key, value, updated_at)
+        VALUES (?, ?, datetime('now'))
+    """, (key, value))
+    conn.commit()
+
+
 def upsert_strategy(name: str, capital: float, params: dict,
                     backtest_cagr: float = 0.0, backtest_win_rate: float = 0.0,
                     is_active: bool = False):

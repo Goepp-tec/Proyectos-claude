@@ -98,6 +98,7 @@ class TradingBot:
         self.portfolio:  PortfolioManager = None
         self.learning:   LearningEngine   = None
         self._strat_dfs: Dict[str, object] = {}
+        self._logged_candle: Dict[str, str] = {}
         self._current_price: float = 0.0
         self._price_lock = threading.Lock()
 
@@ -267,12 +268,18 @@ class TradingBot:
                     signal = strat.generate_signal(df)
 
                     if signal.is_actionable:
-                        logger.info(
-                            f"[{strat.name}] SIGNAL {signal.type.value} "
-                            f"conf={signal.confidence:.2f} ml={ml_conf:.2f} "
-                            f"price=${price:,.2f}"
+                        candle = str(df.index[-1])
+                        if self._logged_candle.get(strat.name) != candle:
+                            self._logged_candle[strat.name] = candle
+                            logger.info(
+                                f"[{strat.name}] SIGNAL {signal.type.value} "
+                                f"conf={signal.confidence:.2f} ml={ml_conf:.2f} "
+                                f"price=${price:,.2f} candle={candle}"
+                            )
+                        placed = self.portfolio.process_signal(
+                            strat, signal, price, ml_confidence=ml_conf,
+                            candle_ts=candle,
                         )
-                        placed = self.portfolio.process_signal(strat, signal, price, ml_confidence=ml_conf)
                         if placed:
                             logger.info(f"[{strat.name}] ✓ Paper trade opened")
                     else:

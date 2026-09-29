@@ -97,10 +97,15 @@ class PortfolioManager:
     def process_signal(self, strategy: BaseStrategy,
                        signal: Signal,
                        current_price: float,
-                       ml_confidence: float = 0.5) -> bool:
+                       ml_confidence: float = 0.5,
+                       candle_ts: Optional[str] = None) -> bool:
         """
         Evaluate a signal from a strategy and execute if conditions are met.
         Returns True if an order was placed.
+
+        candle_ts identifies the closed candle the signal was computed on. The
+        trading loop re-evaluates the same closed candle every minute, so a
+        signal is acted on (or rejected) only once per candle, like the backtester.
         """
         if not strategy.is_active:
             return False
@@ -109,6 +114,12 @@ class PortfolioManager:
 
         with self._lock:
             strat_name = strategy.name
+
+            if candle_ts is not None:
+                key = f"last_signal_candle:{strat_name}"
+                if db.get_meta(key) == candle_ts:
+                    return False
+                db.set_meta(key, candle_ts)
 
             # ── Risk checks ───────────────────────────────────────────────────
             if not self._risk_check(strat_name, signal, ml_confidence, current_price):
