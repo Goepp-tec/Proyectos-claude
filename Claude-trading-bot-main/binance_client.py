@@ -21,6 +21,7 @@ Changes:
 """
 
 import logging
+import os
 import threading
 import time
 import json
@@ -48,7 +49,9 @@ from utils.indicators import add_all_indicators
 
 logger = logging.getLogger(__name__)
 
-BINANCE_PUBLIC_BASE = "https://api.binance.com"
+# Overridable via .env (e.g. https://data-api.binance.vision, Binance's official
+# public market-data mirror) for regions where api.binance.com returns HTTP 451.
+BINANCE_PUBLIC_BASE = os.getenv("BINANCE_PUBLIC_BASE", "https://api.binance.com")
 REQUEST_TIMEOUT = 15
 MAX_RETRIES = 3
 RETRY_BACKOFF = 1.5
