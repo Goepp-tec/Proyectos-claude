@@ -1,6 +1,7 @@
 """
 Standalone backtest runner – no live trading.
-Run this first to see which strategies pass the 50% CAGR threshold
+Run this first to see which strategies pass the thresholds in config.py
+(CAGR >= 30%, WinRate >= 38%, ProfitFactor >= 1.2, trades >= MIN_BACKTEST_TRADES)
 before committing real capital.
 
 Usage:
@@ -42,15 +43,17 @@ def main():
     print("-"*80)
     for name, r in results.items():
         status = "✓ PASS" if r.passes_threshold else "✗ FAIL"
+        pf = f"{r.profit_factor:.2f}" if r.pf_reliable else "n/a"
         print(
             f"{name:<22} {r.cagr*100:>7.1f}%  {r.win_rate*100:>8.1f}%  "
-            f"{r.profit_factor:>10.2f}  {r.max_drawdown*100:>7.1f}%  "
+            f"{pf:>10}  {r.max_drawdown*100:>7.1f}%  "
             f"{r.total_trades:>6}  {status:>8}"
         )
     print("="*80)
     print(f"\nThresholds: CAGR≥{config.MIN_CAGR_THRESHOLD*100:.0f}%  "
           f"WinRate≥{config.MIN_WIN_RATE*100:.0f}%  "
-          f"ProfFactor≥{config.MIN_PROFIT_FACTOR:.1f}\n")
+          f"ProfFactor≥{config.MIN_PROFIT_FACTOR:.1f}  "
+          f"Trades≥{config.MIN_BACKTEST_TRADES} (PF n/a below that)\n")
 
     # ── Plot equity curves ─────────────────────────────────────────────────
     n     = len(results)

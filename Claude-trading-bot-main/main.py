@@ -142,7 +142,8 @@ class TradingBot:
                 reason = (
                     f"CAGR={result.cagr*100:.1f}% "
                     f"WR={result.win_rate*100:.1f}% "
-                    f"PF={result.profit_factor:.2f}"
+                    f"PF={result.pf_display} "
+                    f"trades={result.total_trades}"
                 )
 
             share = config.INITIAL_CAPITAL / max(

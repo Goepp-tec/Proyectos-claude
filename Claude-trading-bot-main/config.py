@@ -43,6 +43,10 @@ BACKTEST_DAYS          = 500   # 500 days – needed for SMA-250 on daily strate
 MIN_CAGR_THRESHOLD     = 0.30  # Require ≥30% annualised CAGR to activate a strategy
 MIN_WIN_RATE           = 0.38  # 38% minimum – momentum strategies have lower WR but high R:R
 MIN_PROFIT_FACTOR      = 1.20  # Min gross profit / gross loss ratio
+# Below this many trades the profit factor is reported as not reliable ("n/a")
+# and the strategy cannot be activated, whatever its CAGR / WR / PF.
+MIN_BACKTEST_TRADES    = int(os.getenv("MIN_BACKTEST_TRADES", "30"))
+PF_NO_LOSS_CAP         = 99.99  # PF reported when there are wins but no losses
 
 # ─── Learning Engine ───────────────────────────────────────────────────────────
 MIN_TRADES_FOR_LEARNING = 10    # start ML tuning after N trades

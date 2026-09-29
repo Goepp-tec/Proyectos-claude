@@ -74,6 +74,13 @@ class BacktestResult:
     trades: List[BacktestTrade] = field(default_factory=list)
     equity_curve: List[float] = field(default_factory=list)
     passes_threshold: bool = False
+    pf_reliable: bool = False          # False when total_trades < MIN_BACKTEST_TRADES
+
+    @property
+    def pf_display(self) -> str:
+        if self.pf_reliable:
+            return f"{self.profit_factor:.2f}"
+        return f"n/a ({self.total_trades}<{config.MIN_BACKTEST_TRADES} trades)"
 
     def summary(self) -> str:
         status = "✓ PASS" if self.passes_threshold else "✗ FAIL"
@@ -81,7 +88,7 @@ class BacktestResult:
             f"[{status}] {self.strategy_name}: "
             f"CAGR={self.cagr*100:.1f}% | "
             f"WinRate={self.win_rate*100:.1f}% | "
-            f"PF={self.profit_factor:.2f} | "
+            f"PF={self.pf_display} | "
             f"MaxDD={self.max_drawdown*100:.1f}% | "
             f"Trades={self.total_trades}"
         )
@@ -258,8 +265,12 @@ class Backtester:
         total_pnl  = sum(t.pnl - t.fees for t in trades)
         win_rate   = len(wins) / len(trades)
         gross_win  = sum(t.pnl for t in wins)
-        gross_loss = abs(sum(t.pnl for t in losses)) + 1e-8
-        pf         = gross_win / gross_loss
+        gross_loss = abs(sum(t.pnl for t in losses))
+        if gross_loss > 0:
+            pf = gross_win / gross_loss
+        else:   # no losing trade: dividing by ~0 used to report PF ~3e9
+            pf = config.PF_NO_LOSS_CAP if gross_win > 0 else 0.0
+        pf_reliable = len(trades) >= config.MIN_BACKTEST_TRADES
 
         # CAGR: approximate days from candle count (interval-aware)
         interval_h = {"1h": 1, "4h": 4, "1d": 24}.get(
@@ -287,6 +298,7 @@ class Backtester:
             sr = sortino = 0.0
 
         passes = (
+            pf_reliable and
             cagr >= config.MIN_CAGR_THRESHOLD and
             win_rate >= config.MIN_WIN_RATE and
             pf >= config.MIN_PROFIT_FACTOR
@@ -312,6 +324,7 @@ class Backtester:
             trades=trades,
             equity_curve=equity,
             passes_threshold=passes,
+            pf_reliable=pf_reliable,
         )
 
 
