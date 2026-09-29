@@ -284,7 +284,9 @@ class AdaptiveTuner:
             return None
         warm = max(strat.min_candles,
                    *(strat.clone({p: s.max}).min_candles for p, s in strat.TUNABLE_PARAMS.items()))
-        i0, i1 = df.index.searchsorted(start), df.index.searchsorted(end)
+        # Count instead of searchsorted: Binance candles are datetime64[ms] and
+        # searchsorted cannot convert a microsecond clock time losslessly.
+        i0, i1 = int((df.index < start).sum()), int((df.index < end).sum())
         if i0 < warm or i1 - i0 < 2:
             return None
         return i0, i1

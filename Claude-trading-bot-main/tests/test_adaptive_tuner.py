@@ -162,6 +162,22 @@ def test_validation_window_starts_after_proposal_window_with_exact_warmup():
         assert first_decision >= val_start
 
 
+def test_millisecond_candle_index_with_microsecond_clock():
+    """Binance candles are datetime64[ms]; the live clock has microseconds."""
+    def history_ms(interval, days, end):
+        return _history(interval, days, end).set_axis(
+            _history(interval, days, end).index.as_unit("ms"))
+
+    ev = _metrics_by_k({("proposal", 4): (1.5, 0.10, 20), ("validation", 3): (1.2, 0.10, 20),
+                        ("validation", 4): (1.4, 0.10, 20)})
+    strat = ToyStrategy()
+    clock = Clock(T0.replace(hour=3, minute=49, second=48, microsecond=123456))
+    tuner = AdaptiveTuner({strat.name: strat}, history_ms, lambda b, n: 1000.0, clock,
+                          learner_book="main", evaluate_fn=ev)
+    tuner.run_cycle_if_due()
+    assert db.get_learning_audit("Toy")[0]["decision"] == "applied"
+
+
 def test_real_backtester_cycle_on_synthetic_prices_stays_in_bounds():
     from strategies.ema5_momentum import EMA5MomentumStrategy
     rng = np.random.default_rng(7)
