@@ -133,6 +133,7 @@ app.layout = dbc.Container(fluid=True, style={"backgroundColor": COLORS["bg"],
         dbc.Tab(label="Aprendizaje",           tab_id="tab-learning"),
         dbc.Tab(label="Estrategias",           tab_id="tab-evaluation"),
         dbc.Tab(label="Mercado",               tab_id="tab-market"),
+        dbc.Tab(label="Informe diario",        tab_id="tab-report"),
         dbc.Tab(label="Control",               tab_id="tab-control"),
     ]),
 
@@ -276,8 +277,8 @@ def render_tab_for(active_tab, trigger):
         # A form: rebuilding it every 10 s would wipe what the user is typing.
         # Its live status box has its own refresh callback.
         return dash.no_update if trigger == "interval-refresh" else _render_control()
-    if active_tab == "tab-market" and trigger == "interval-refresh":
-        return dash.no_update      # hourly data; keeps the coin chosen in the selector
+    if active_tab in ("tab-market", "tab-report") and trigger == "interval-refresh":
+        return dash.no_update      # hourly / daily data; keeps the coin or day chosen
     if active_tab == "tab-overview":
         return _render_overview()
     elif active_tab == "tab-strategies":
@@ -294,6 +295,8 @@ def render_tab_for(active_tab, trigger):
         return _render_strategy_evaluation()
     elif active_tab == "tab-market":
         return _render_market()
+    elif active_tab == "tab-report":
+        return _render_daily_report()
     return html.Div("Select a tab")
 
 
@@ -1060,6 +1063,51 @@ def _market_content(sym: str):
         dbc.Row([dbc.Col(c, md=2) for c in cards], className="g-2 mb-3"),
         *[dcc.Graph(figure=f, config={"displayModeBar": False}) for f in figs],
     ])
+
+
+# ─── Daily report (daily_report.py) ──────────────────────────────────────────
+
+def _report_files() -> list:
+    """Daily report files, newest first (the folder of the latest one)."""
+    import glob
+    latest = db.get_meta("daily_report:latest")
+    if not latest:
+        return []
+    return sorted(glob.glob(os.path.join(os.path.dirname(latest), "informe_diario_*.txt")), reverse=True)
+
+
+def _report_text(path: str) -> str:
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return "No se pudo leer el informe."
+
+
+def _render_daily_report():
+    files = _report_files()
+    if not files:
+        return html.Div("Todavía no hay informes diarios: el bot escribe el del día anterior poco "
+                        "después de las 00:00 UTC.", style={"color": COLORS["subtext"], "padding": "20px"})
+    day = lambda p: os.path.basename(p)[len("informe_diario_"):-4]
+    return html.Div([
+        dbc.Row([
+            dbc.Col(html.Div("Día (UTC):", style={"color": COLORS["subtext"], "paddingTop": "6px"}), width="auto"),
+            dbc.Col(dcc.Dropdown(id="report-file", value=files[0], clearable=False,
+                                 options=[{"label": day(p), "value": p} for p in files],
+                                 style={"color": "#000"}), md=3),
+        ], className="g-2 mb-2"),
+        html.Pre(id="report-content", children=_report_text(files[0]),
+                 style={"color": COLORS["text"], "backgroundColor": COLORS["card"], "padding": "14px",
+                        "fontSize": "12px", "whiteSpace": "pre-wrap"}),
+    ])
+
+
+@app.callback(Output("report-content", "children"), Input("report-file", "value"),
+              prevent_initial_call=True)
+def show_daily_report(path):
+    # only files listed by _report_files (the reports folder) can be shown
+    return _report_text(path) if path in _report_files() else dash.no_update
 
 
 # ─── Control: aggressiveness, budget, mode (risk_engine.py) ──────────────────

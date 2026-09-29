@@ -43,6 +43,7 @@ from strategy_evaluator import StrategyEvaluator
 from risk_engine import RiskEngine, RiskSettings, profile as risk_profile
 from market_data import MarketDataCollector, enrich as enrich_market_data
 from utils import price_of, symbol_of
+from daily_report import DailyReporter
 
 # ─── Logging setup ────────────────────────────────────────────────────────────
 # Console handler with colors (if available)
@@ -209,6 +210,7 @@ class TradingBot:
         self.lab_portfolio: PortfolioManager = None
         self.evaluator: StrategyEvaluator = None
         self.risk: RiskEngine = None   # budget / aggressiveness for the learning book
+        self.reporter: DailyReporter = None   # daily report (reports/informe_diario_*.txt)
         # Free positioning / funding / Fear & Greed data, joined to every candle
         self.market = MarketDataCollector(self.symbols)
         self._strat_dfs: Dict[tuple, object] = {}     # (symbol, interval) -> candles
@@ -368,6 +370,7 @@ class TradingBot:
             book=self.book,
         )
 
+        self.reporter = self._build_reporter()
         logger.info("Startup complete. Entering trading loops.\n")
 
     # ─── Main run ─────────────────────────────────────────────────────────────
@@ -523,6 +526,7 @@ class TradingBot:
                     self.evaluator.run_cycle_if_due()
                 if config.LEARNING_ENABLED and self.tuner:
                     self.tuner.run_cycle_if_due()
+                self._write_daily_report()     # once per UTC day
 
             except Exception as e:
                 logger.error(f"[learning] Error: {e}", exc_info=True)
@@ -650,6 +654,28 @@ class TradingBot:
         symbol = symbol or config.SYMBOL
         df = self.client.get_historical_klines(symbol, interval, days)
         return enrich_market_data(df[df.index < end], symbol, interval)
+
+    def _build_reporter(self) -> DailyReporter:
+        return DailyReporter(
+            out_dir=os.path.join(config.DATA_DIR, "reports"),
+            books={"aprende": (self.book, self.portfolio),
+                   "lab": ("lab", self.lab_portfolio),
+                   "baseline": ("baseline", self.baseline_portfolio)},
+            prices_fn=self.prices, closes_fn=self._daily_closes,
+        )
+
+    def _daily_closes(self, symbol: str):
+        return self.client.get_latest_candles(symbol, "1d", limit=10)["close"]
+
+    def _write_daily_report(self):
+        """Daily report of the previous UTC day, once; never breaks the loop."""
+        if getattr(self, "reporter", None) is None:
+            return None
+        try:
+            return self.reporter.write_if_due()
+        except Exception as e:
+            logger.error(f"[report] daily report failed: {e}", exc_info=True)
+            return None
 
     def _get_strat(self, name: str):
         for s in self.strategies:
