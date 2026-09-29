@@ -29,6 +29,7 @@ import pandas as pd
 
 import config
 import database as db
+from utils import coin_of
 
 # ─── App bootstrap ────────────────────────────────────────────────────────────
 
@@ -156,6 +157,7 @@ def update_header(_):
 
 
 _price_fetcher = None
+_prices_cache = {"at": 0.0, "prices": {}}
 
 
 def _get_price_fetcher():
@@ -166,7 +168,37 @@ def _get_price_fetcher():
     if _price_fetcher is None:
         import binance_client
         _price_fetcher = binance_client.BinancePublicDataFetcher()
+        _prices_cache.update(at=0.0, prices={})
     return _price_fetcher
+
+
+def _live_prices() -> dict:
+    """{symbol: price} for every traded symbol; shared by all callbacks for 10 s."""
+    import time
+    fetcher = _get_price_fetcher()
+    if time.time() - _prices_cache["at"] > 10:
+        prices = {}
+        for sym in config.SYMBOLS:
+            try:
+                prices[sym] = float(fetcher.get_current_price(sym))
+            except Exception:
+                pass
+        _prices_cache.update(at=time.time(), prices=prices)
+    return dict(_prices_cache["prices"])
+
+
+def _symbol_of_name(name: str) -> str:
+    """'EMA5_Momentum@ETH' -> 'ETHUSDT'; no suffix = the primary symbol."""
+    return f"{name.split('@', 1)[1]}USDT" if "@" in name else config.SYMBOL
+
+
+def _unrealized(pos: dict, prices: dict):
+    """Unrealized P&L of a position at its own symbol's price (None without a price)."""
+    price = prices.get(pos.get("symbol") or config.SYMBOL)
+    if not price:
+        return None
+    ep, qty = float(pos["entry_price"]), float(pos["quantity"])
+    return (price - ep) * qty if pos["side"] == "LONG" else (ep - price) * qty
 
 
 @app.callback(
@@ -182,15 +214,9 @@ def update_kpis(_):
     # Compute unrealized P&L LIVE from current open positions + latest price
     # (don't trust stale DB values that may be minutes old)
     try:
-        current_price = _get_price_fetcher().get_current_price(config.SYMBOL)
-        unreal = 0.0
-        for pos in db.get_open_positions():
-            ep = float(pos["entry_price"])
-            qty = float(pos["quantity"])
-            if pos["side"] == "LONG":
-                unreal += (current_price - ep) * qty
-            else:
-                unreal += (ep - current_price) * qty
+        prices = _live_prices()
+        unreal = sum(u for pos in db.get_open_positions()
+                     for u in [_unrealized(pos, prices)] if u is not None)
     except Exception:
         # Fallback to DB value if live calculation fails
         unreal = bal.get("unrealized_pnl", 0.0)
@@ -250,6 +276,8 @@ def render_tab_for(active_tab, trigger):
         # A form: rebuilding it every 10 s would wipe what the user is typing.
         # Its live status box has its own refresh callback.
         return dash.no_update if trigger == "interval-refresh" else _render_control()
+    if active_tab == "tab-market" and trigger == "interval-refresh":
+        return dash.no_update      # hourly data; keeps the coin chosen in the selector
     if active_tab == "tab-overview":
         return _render_overview()
     elif active_tab == "tab-strategies":
@@ -337,14 +365,15 @@ def _render_strategies():
     rows = []
     charts = []
 
-    # Get current price for unrealized P&L calculation
+    # Current prices for unrealized P&L (each strategy at its own coin's price)
     try:
-        current_price = _get_price_fetcher().get_current_price(config.SYMBOL)
+        prices = _live_prices()
     except Exception:
-        current_price = 0.0
+        prices = {}
 
     for i, strat in enumerate(strategies):
         name  = strat["name"]
+        current_price = prices.get(_symbol_of_name(name), 0.0)
         stats = db.get_trade_stats(name, include_backtest=config.SHOW_BACKTEST_DATA)
         db_capital = strat.get("capital", 0)  # Free capital from DB
         wr    = float(stats.get("win_rate") or 0)
@@ -445,19 +474,11 @@ def _render_positions():
             html.P("No open positions.", style={"color": COLORS["subtext"], "padding": "20px"}),
         ])
 
-    # Need current price for unrealized PnL
-    # Try to read from DB or use last stored balance
-    last_bal = db.get_latest_balance()
+    # Live price of each position's own coin
     try:
-        bd = last_bal.get("strategy_breakdown", {}) if last_bal else {}
-        # Try reading a stored price from a JSON field
-        current_price = None
-        for v in bd.values():
-            if isinstance(v, dict) and "current_price" in v:
-                current_price = v["current_price"]
-                break
+        prices = _live_prices()
     except Exception:
-        current_price = None
+        prices = {}
 
     rows = []
     for p in positions:
@@ -466,14 +487,13 @@ def _render_positions():
         sl  = float(p["stop_loss"] or 0)
         tp  = float(p["take_profit"] or 0)
         ml  = float(p.get("ml_confidence") or 0.5)
+        symbol = p.get("symbol") or config.SYMBOL
+        current_price = prices.get(symbol)
 
         unreal = "N/A"
         unreal_pct = "N/A"
-        if current_price:
-            if p["side"] == "LONG":
-                ur = (current_price - ep) * qty
-            else:
-                ur = (ep - current_price) * qty
+        ur = _unrealized(p, prices)
+        if ur is not None:
             unreal     = f"${ur:+.2f}"
             unreal_pct = f"{(ur / (ep * qty)) * 100:+.2f}%"
 
@@ -481,11 +501,12 @@ def _render_positions():
 
         rows.append({
             "ID": p["id"],
+            "Cripto": coin_of(symbol),
             "Strategy": p["strategy_name"],
             "Side": p["side"],
             "Entry Price": f"${ep:,.2f}",
             "Current Price": cur_price_str,
-            "Qty (BTC)": f"{qty:.5f}",
+            "Qty": f"{qty:.5f}",
             "Notional": f"${ep * qty:,.2f}",
             "Stop Loss": f"${sl:,.2f}",
             "Take Profit": f"${tp:,.2f}",
@@ -738,8 +759,8 @@ def _render_learning():
     learn_bd = learn_bal.get("strategy_breakdown", {})
     base_bd  = base_bal.get("strategy_breakdown", {})
     param_rows = []
-    for S in ALL_STRATEGIES:
-        default = S()
+    from strategies import build_line_up
+    for default in build_line_up(ALL_STRATEGIES, config.SYMBOLS):
         saved = json.loads(db.get_meta(f"learned_params:{default.name}") or "{}")
         for p, spec in default.TUNABLE_PARAMS.items():
             current = saved.get(p, default.params[p])
@@ -820,17 +841,30 @@ def _render_strategy_evaluation():
     ], className="g-2 mb-3")
 
     ordered = sorted(statuses, key=lambda s: -s["score"])
+    top = ordered[:30]          # 25 strategies x 5 coins: the charts show the best 30
     fig_score = go.Figure(go.Bar(
-        x=[s["strategy_name"] for s in ordered], y=[s["score"] for s in ordered],
-        marker_color=[COLORS[STATUS_STYLE[s["status"]][1]] for s in ordered],
-        text=[STATUS_STYLE[s["status"]][0].split(" ", 1)[1] for s in ordered],
+        x=[s["strategy_name"] for s in top], y=[s["score"] for s in top],
+        marker_color=[COLORS[STATUS_STYLE[s["status"]][1]] for s in top],
+        text=[STATUS_STYLE[s["status"]][0].split(" ", 1)[1] for s in top],
     ))
-    fig_score.update_layout(**_dark_layout("Puntaje de viabilidad (0 = descartada)"), height=300,
-                            yaxis_range=[0, 1])
+    fig_score.update_layout(**_dark_layout(
+        "Puntaje de viabilidad (0 = descartada)" + (f" — las {len(top)} mejores de {len(ordered)}"
+                                                    if len(ordered) > len(top) else "")),
+        height=300, yaxis_range=[0, 1])
+
+    # Per coin: how many strategies are viable / conditional / in test / discarded
+    coin_rows = []
+    for sym in sorted({_symbol_of_name(s["strategy_name"]) for s in statuses},
+                      key=lambda x: (x != config.SYMBOL, x)):
+        mine = [s for s in statuses if _symbol_of_name(s["strategy_name"]) == sym]
+        best = max(mine, key=lambda s: s["score"])
+        coin_rows.append({"Cripto": coin_of(sym),
+                          **{STATUS_STYLE[k][0]: sum(s["status"] == k for s in mine) for k in STATUS_STYLE},
+                          "Mejor estrategia": f"{best['strategy_name']} ({best['score']:.2f})"})
 
     # "When": profit factor per market regime (text = trades)
     z, text = [], []
-    for s in ordered:
+    for s in top:
         row_z, row_t = [], []
         for r in REGIMES:
             st = s["metrics"].get("by_regime", {}).get(r)
@@ -839,21 +873,22 @@ def _render_strategy_evaluation():
         z.append(row_z)
         text.append(row_t)
     fig_regime = go.Figure(go.Heatmap(
-        z=z, x=[REGIME_ES[r] for r in REGIMES], y=[s["strategy_name"] for s in ordered],
+        z=z, x=[REGIME_ES[r] for r in REGIMES], y=[s["strategy_name"] for s in top],
         text=text, texttemplate="%{text}", zmin=0.5, zmax=1.5, zmid=1.0,
         colorscale=[[0, COLORS["red"]], [0.5, COLORS["card"]], [1, COLORS["green"]]],
         colorbar=dict(title="PF"),
     ))
     fig_regime.update_layout(**_dark_layout("¿Cuándo funciona? Profit factor por tipo de mercado "
-                                            "(backtest walk-forward)"), height=60 + 28 * len(ordered))
+                                            "(backtest walk-forward)"), height=60 + 28 * len(top))
 
     rows = []
     for s in ordered:
         m = s["metrics"]
         live = m.get("live", {})
-        origin, S = catalog.get(s["strategy_name"], ("?", None))
+        origin, S = catalog.get(s["strategy_name"].split("@")[0], ("?", None))
         rows.append({
             "Estrategia": s["strategy_name"],
+            "Cripto": coin_of(_symbol_of_name(s["strategy_name"])),
             "Origen": origin,
             "Estado": STATUS_STYLE[s["status"]][0],
             "Puntaje": f"{s['score']:.2f}",
@@ -882,6 +917,8 @@ def _render_strategy_evaluation():
             "Es evidencia histórica, no garantía.",
             color="secondary", style={"fontSize": "13px"}),
         cards,
+        html.H6("Por cripto", style={"color": COLORS["blue"], "margin": "8px 0"}),
+        _table(coin_rows, page_size=10),
         dcc.Graph(figure=fig_score, config={"displayModeBar": False}),
         dcc.Graph(figure=fig_regime, config={"displayModeBar": False}),
         html.H6("Detalle por estrategia", style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
@@ -904,14 +941,32 @@ def _fng_label(v: float) -> str:
 
 
 def _render_market():
+    symbols = config.SYMBOLS
+    selector = dbc.Row([
+        dbc.Col(html.Div("Cripto:", style={"color": COLORS["subtext"], "paddingTop": "6px"}), width="auto"),
+        dbc.Col(dcc.Dropdown(id="market-symbol", value=symbols[0], clearable=False,
+                             options=[{"label": f"{coin_of(x)} ({x})", "value": x} for x in symbols],
+                             style={"color": "#000"}), md=3),
+    ], className="g-2 mb-2")
+    return html.Div(id="market-panel", children=[
+        selector, html.Div(id="market-content", children=_market_content(symbols[0]))])
+
+
+@app.callback(Output("market-content", "children"), Input("market-symbol", "value"),
+              prevent_initial_call=True)
+def update_market_symbol(symbol):
+    return _market_content(symbol or config.SYMBOL)
+
+
+def _market_content(sym: str):
     from market_data import load_series
-    sym = config.SYMBOL
-    s = {m: load_series(sym, m) for m in ("fng", "funding_rate", "top_pos_ratio", "global_ratio",
-                                          "taker_ratio", "oi_value")}
+    s = {m: load_series(sym, m) for m in (
+        "fng", "funding_rate", "top_pos_ratio", "global_ratio", "taker_ratio", "oi_value",
+        "okx_top_pos_ratio", "hl_top_net", "hl_top_holders", "cot_am_net", "cot_lev_net")}
     if all(x.empty for x in s.values()):
         return html.Div("Todavía no hay datos de mercado: el bot los recoge cada hora "
                         "(la primera vez tarda unos minutos).",
-                        id="market-panel", style={"color": COLORS["subtext"], "padding": "20px"})
+                        style={"color": COLORS["subtext"], "padding": "20px"})
 
     long_pct = lambda r: r / (1 + r) * 100         # long/short ratio -> % of longs
     last = lambda x: float(x.iloc[-1]) if len(x) else None
@@ -932,19 +987,52 @@ def _render_market():
         cards.append(_metric_card("Compradores / vendedores", f"{v:.2f}", "green" if v >= 1 else "red",
                                   subtitle="volumen agresivo (taker)"))
     if (v := last(s["oi_value"])) is not None:
-        cards.append(_metric_card("Open interest", f"${v / 1e9:,.2f} B", "text", subtitle="futuros BTCUSDT"))
+        cards.append(_metric_card("Open interest", f"${v / 1e9:,.2f} B", "text", subtitle=f"futuros {sym}"))
+    if (v := last(s["okx_top_pos_ratio"])) is not None:
+        cards.append(_metric_card("OKX top traders en largo", f"{long_pct(v):.1f}%", "blue",
+                                  subtitle=f"ratio {v:.2f} (top 5% por posición)"))
+    if (v := last(s["hl_top_net"])) is not None:
+        n = last(s["hl_top_holders"]) or 0
+        cards.append(_metric_card("Ballenas Hyperliquid", f"{v:+.0%}", "green" if v >= 0 else "red",
+                                  subtitle=f"neto de {n:.0f} billeteras top (+ = largo)"))
+    if (v := last(s["cot_am_net"])) is not None:
+        cards.append(_metric_card("Instituciones CME", f"{v:+.1%}", "green" if v >= 0 else "red",
+                                  subtitle="asset managers, neto / open interest"))
+    if (v := last(s["cot_lev_net"])) is not None:
+        cards.append(_metric_card("Fondos apalancados CME", f"{v:+.1%}", "green" if v >= 0 else "red",
+                                  subtitle="hedge funds / CTAs, neto (semanal)"))
 
     figs = []
-    if len(s["top_pos_ratio"]) or len(s["global_ratio"]):
+    if len(s["top_pos_ratio"]) or len(s["global_ratio"]) or len(s["okx_top_pos_ratio"]):
         fig = go.Figure()
-        for key, name, color in (("top_pos_ratio", "Top traders (posición)", COLORS["blue"]),
-                                 ("global_ratio", "Todas las cuentas", COLORS["purple"])):
+        for key, name, color in (("top_pos_ratio", "Binance top traders", COLORS["blue"]),
+                                 ("okx_top_pos_ratio", "OKX top traders", COLORS["green"]),
+                                 ("global_ratio", "Binance todas las cuentas", COLORS["purple"])):
             x = s[key]
             if len(x):
                 fig.add_trace(go.Scatter(x=x.index, y=long_pct(x), name=name, line=dict(color=color, width=2)))
         fig.add_hline(y=50, line_dash="dot", line_color=COLORS["border"])
-        fig.update_layout(**_dark_layout("% en largo: top traders vs la masa (Binance Futures)"),
+        fig.update_layout(**_dark_layout(f"% en largo: top traders vs la masa ({coin_of(sym)})"),
                           height=300, yaxis_ticksuffix="%")
+        figs.append(fig)
+    if len(s["hl_top_net"]) > 1:
+        x = s["hl_top_net"]
+        fig = go.Figure(go.Scatter(x=x.index, y=x * 100, line=dict(color=COLORS["yellow"], width=2),
+                                   name="Hyperliquid"))
+        fig.add_hline(y=0, line_dash="dot", line_color=COLORS["border"])
+        fig.update_layout(**_dark_layout("Ballenas de Hyperliquid: exposición neta (+100% = todo largo)"),
+                          height=260, yaxis_ticksuffix="%")
+        figs.append(fig)
+    if len(s["cot_am_net"]):
+        fig = go.Figure()
+        for key, name, color in (("cot_am_net", "Asset managers", COLORS["green"]),
+                                 ("cot_lev_net", "Fondos apalancados", COLORS["red"])):
+            x = s[key]
+            if len(x):
+                fig.add_trace(go.Scatter(x=x.index, y=x * 100, name=name, line=dict(color=color, width=2)))
+        fig.add_hline(y=0, line_dash="dot", line_color=COLORS["border"])
+        fig.update_layout(**_dark_layout("CME: posición neta de instituciones (% del open interest, CFTC)"),
+                          height=260, yaxis_ticksuffix="%")
         figs.append(fig)
     if len(s["fng"]):
         x = s["fng"].iloc[-365:]
@@ -961,11 +1049,13 @@ def _render_market():
                           yaxis_ticksuffix="%")
         figs.append(fig)
 
-    return html.Div(id="market-panel", children=[
-        dbc.Alert("Datos públicos y gratuitos: posicionamiento de los top traders y de todas las cuentas "
-                  "de Binance Futures, funding, volumen agresivo y el índice de Miedo y Codicia. Binance "
-                  "solo guarda 30 días de los ratios: la historia se acumula desde que el bot los recoge. "
-                  "Las estrategias modernas usan estos datos y el evaluador decide si sirven.",
+    return html.Div([
+        dbc.Alert("Datos públicos y gratuitos: top traders y todas las cuentas de Binance Futures, top "
+                  "traders de OKX, posiciones on-chain de las billeteras más rentables de Hyperliquid, "
+                  "instituciones en los futuros de la CME (informe COT de la CFTC, solo BTC y ETH), "
+                  "funding, volumen agresivo y el índice de Miedo y Codicia. Binance guarda 30 días de "
+                  "ratios y OKX 60; Hyperliquid solo desde que el bot empezó a mirar. Las estrategias "
+                  "usan estos datos y el evaluador decide si sirven.",
                   color="secondary", style={"fontSize": "13px"}),
         dbc.Row([dbc.Col(c, md=2) for c in cards], className="g-2 mb-3"),
         *[dcc.Graph(figure=f, config={"displayModeBar": False}) for f in figs],
@@ -1093,9 +1183,8 @@ def update_control_status(_):
     unreal = 0.0
     if positions:
         try:
-            price = _get_price_fetcher().get_current_price(config.SYMBOL)
-            unreal = sum(((price - x["entry_price"]) if x["side"] == "LONG" else (x["entry_price"] - price))
-                         * x["quantity"] for x in positions)
+            prices = _live_prices()
+            unreal = sum(u for x in positions for u in [_unrealized(x, prices)] if u is not None)
         except Exception:
             pass
     pnl = float(db.get_trade_stats(book=book).get("total_pnl") or 0) + unreal

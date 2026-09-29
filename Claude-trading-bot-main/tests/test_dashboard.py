@@ -140,3 +140,53 @@ def test_market_tab_without_data_explains_why(temp_db):
 def test_learning_tab_is_registered():
     from dashboard import app as dash_app
     assert "tab-learning" in _dump(dash_app.app.layout)
+
+
+def test_positions_and_kpis_value_each_coin_at_its_own_price(temp_db, monkeypatch):
+    import binance_client
+    import config
+    from dashboard import app as dash_app
+    monkeypatch.setattr(config, "SYMBOLS", ["BTCUSDT", "ETHUSDT"])
+    db.open_position(strategy_name="A", symbol="BTCUSDT", side="LONG", entry_price=50_000.0,
+                     quantity=0.001, stop_loss=45_000.0, take_profit=60_000.0, order_id="x",
+                     ml_confidence=0.6, metadata={}, book="main", entry_time="2026-09-29T10:00:00+00:00")
+    db.open_position(strategy_name="A@ETH", symbol="ETHUSDT", side="LONG", entry_price=2_000.0,
+                     quantity=0.01, stop_loss=1_800.0, take_profit=2_400.0, order_id="y",
+                     ml_confidence=0.6, metadata={}, book="main", entry_time="2026-09-29T10:00:00+00:00")
+    dash_app._price_fetcher = None
+    live = {"BTCUSDT": 50_000.0, "ETHUSDT": 2_100.0}
+    with patch.object(binance_client, "BinancePublicDataFetcher") as fetcher:
+        fetcher.return_value.get_current_price.side_effect = lambda sym: live[sym]
+        kpis = _dump(dash_app.update_kpis(0)[0])
+        positions = _dump(dash_app._render_positions())
+    assert "+1.00" in kpis                          # only ETH moved: +100 x 0.01
+    assert "ETH" in positions and "2,100.00" in positions
+
+
+def test_market_tab_has_a_coin_selector_and_the_new_sources(temp_db, monkeypatch):
+    import dash
+    import config
+    from dashboard import app as dash_app
+    from market_data import MarketDataCollector
+    from tests.test_market_data import T0, _fake_http
+    monkeypatch.setattr(config, "SYMBOLS", ["BTCUSDT", "ETHUSDT"])
+    MarketDataCollector(["BTCUSDT", "ETHUSDT"], http=_fake_http(), clock=lambda: T0).update(force=True)
+    panel = _dump(dash_app._render_market())
+    assert "market-symbol" in panel and "ETHUSDT" in panel
+    eth = _dump(dash_app.update_market_symbol("ETHUSDT"))
+    for text in ("OKX", "Hyperliquid", "CME"):
+        assert text in eth, text
+    # hourly data: the tab (and the chosen coin) is not rebuilt by the 10 s refresh
+    assert dash_app.render_tab_for("tab-market", "interval-refresh") is dash.no_update
+
+
+def test_strategies_tab_summarises_each_coin(temp_db):
+    from dashboard import app as dash_app
+    m = {"trades": 40, "profit_factor": 1.3, "profitable_windows": 3, "windows": 4,
+         "worst_drawdown": 0.05, "by_regime": {}, "by_side": {}, "live": {}}
+    db.upsert_strategy_status("Turtle_Breakout", "VIABLE", 0.8, ["RANGING"], ["LONG"], "ok", m)
+    db.upsert_strategy_status("Turtle_Breakout@ETH", "DESCARTADA", 0.0, [], [], "pierde", m)
+    out = _dump(dash_app._render_strategy_evaluation())
+    assert "Por cripto" in out and "Turtle_Breakout@ETH" in out
+    assert "Turtle_Breakout (0.80)" in out            # best strategy of the BTC row
+    assert "Turtle System 1" in out or "Turtle" in out  # source found through the base name
