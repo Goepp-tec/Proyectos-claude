@@ -39,8 +39,38 @@ Educational project: it does not prove profitability and must not trade real mon
 | Blended_MomentumMR | 4h | 50/50 momentum + RSI/Bollinger mean reversion |
 | BTC_MomentumBreakout | 1d | Breakout above 20-day high in a bull regime, volume-confirmed |
 
-`ml_adaptive.py`, `rsi_bollinger.py`, `macd_momentum.py`, `ema_crossover.py` and
-`breakout.py` exist but are **not registered** (they have not passed a backtest).
+### Candidate catalog (`CANDIDATE_STRATEGIES`)
+
+Public, documented trader strategies (each class has a `SOURCE`), added by hand
+with tests — the bot never downloads or runs code from the internet:
+
+| Strategy | Candles | Source |
+|---|---|---|
+| RSI_Bollinger, MACD_Momentum, EMA_Crossover, Breakout | 4h/1h | repo strategies, previously unregistered (repaired) |
+| Turtle_Breakout | 1d | Dennis / Faith, *Way of the Turtle* — System 1 |
+| Connors_RSI2 | 1d | Connors & Alvarez, *Short Term Trading Strategies That Work* |
+| Bollinger_Squeeze | 4h | Bollinger, *Bollinger on Bollinger Bands* — The Squeeze |
+| Supertrend | 4h | Supertrend ATR 10 × 3 |
+| Golden_Cross_50_200 | 1d | 50/200-day moving-average cross |
+
+`ml_adaptive.py` is not registered (model persistence / training not evaluated).
+
+## Strategy evaluator (`strategy_evaluator.py`)
+
+Every `EVAL_INTERVAL_HOURS` (24) each strategy (registered + catalog) is rated from
+a walk-forward backtest on 4 non-overlapping 180-day windows, each trade tagged with
+the **market regime** at entry (trending up / trending down / ranging, from ADX and
+EMA-50/200) and its **side**, plus its live paper trades in the `lab` book:
+
+| Status | Rule (configurable) | Effect |
+|---|---|---|
+| ✅ VIABLE | ≥30 trades, PF ≥1.2, profitable in ≥3/4 windows, DD ≤15% | trades in the learning book |
+| 🟡 CONDICIONAL | PF ≥1.3 with ≥10 trades in some regime | trades only in those regimes |
+| 🔍 EN_PRUEBA | not enough / mixed evidence | lab only |
+| ⛔ DESCARTADA | ≥40 trades, PF <0.9, ≤1 profitable window, no working regime (or losing live) | **score 0, never re-evaluated nor traded again** |
+
+A losing side (≥10 trades, PF <0.9) is blocked. Ratings and their history are in
+`strategy_status` / `strategy_evaluations` and in the dashboard tab **Estrategias**.
 
 In the last 500-day backtest (Sept 2026) **none of the 8 strategies passed** the
 thresholds, so by default the bot runs in observation mode.
@@ -89,7 +119,8 @@ Positions, trades and balances are stored per **book**:
 |---|---|
 | `main` | What the bot trades (only validated strategies, or all with `ALLOW_UNVALIDATED_STRATEGIES=true`) |
 | `observe` | Observation mode: theoretical trades with simulated fills, no orders at all |
-| `baseline` | Frozen default-parameter copy of each active strategy, own virtual capital |
+| `baseline` | Frozen default-parameter copy of each registered strategy, own virtual capital |
+| `lab` | Every non-discarded strategy (registered + catalog) without the evaluator gate: live evidence |
 
 The mode (`TRADE`, `TRADE_UNVALIDATED`, `OBSERVE`) is shown in the dashboard header.
 Every processed signal is logged in `signal_log` (acted on or not, and why). A
@@ -134,7 +165,8 @@ proposals are rejected for that reason, and an accepted change can still be over
 ## Dashboard tabs
 
 Portfolio Overview · Strategy Performance · Open Positions · Trade History ·
-Trade Journal · **Aprendizaje** (learner vs baseline, parameters, learning audit)
+Trade Journal · **Aprendizaje** (learner vs baseline, parameters, learning audit) ·
+**Estrategias** (evaluator: status, score, profit factor per market regime, reasons, sources)
 
 ---
 
