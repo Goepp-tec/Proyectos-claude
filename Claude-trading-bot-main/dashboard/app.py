@@ -129,6 +129,7 @@ app.layout = dbc.Container(fluid=True, style={"backgroundColor": COLORS["bg"],
         dbc.Tab(label="Open Positions",        tab_id="tab-positions"),
         dbc.Tab(label="Trade History",         tab_id="tab-history"),
         dbc.Tab(label="Trade Journal",         tab_id="tab-journal"),
+        dbc.Tab(label="Aprendizaje",           tab_id="tab-learning"),
     ]),
 
     html.Div(id="tab-content", style={"padding": "12px 12px 30px"}),
@@ -145,6 +146,9 @@ def update_header(_):
     now  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     mode = "● TESTNET" if config.USE_TESTNET else "● LIVE"
     color = COLORS["yellow"] if config.USE_TESTNET else COLORS["red"]
+    trading_mode = db.get_meta("trading_mode")
+    if trading_mode:
+        mode += f" · {trading_mode}"
     return now, html.Span(mode, style={"color": color, "marginLeft": "12px"})
 
 
@@ -243,6 +247,8 @@ def render_tab(active_tab, _):
         return _render_history()
     elif active_tab == "tab-journal":
         return _render_journal()
+    elif active_tab == "tab-learning":
+        return _render_learning()
     return html.Div("Select a tab")
 
 
@@ -642,6 +648,132 @@ def _render_journal():
     return html.Div([
         html.H6("Trade Journal", style={"color": COLORS["blue"], "marginBottom": "16px"}),
         html.Div(cards),
+    ])
+
+
+def _table(rows, page_size=15, conditional=None):
+    return dash_table.DataTable(
+        data=rows,
+        columns=[{"name": c, "id": c} for c in rows[0].keys()],
+        page_size=page_size,
+        sort_action="native",
+        filter_action="native",
+        style_table={"overflowX": "auto"},
+        style_header={"backgroundColor": COLORS["card"], "color": COLORS["blue"],
+                      "fontWeight": "bold", "border": f"1px solid {COLORS['border']}"},
+        style_cell={"backgroundColor": COLORS["bg"], "color": COLORS["text"],
+                    "border": f"1px solid {COLORS['border']}", "fontSize": "12px",
+                    "padding": "5px 9px", "whiteSpace": "normal", "textAlign": "left"},
+        style_data_conditional=conditional or [],
+    )
+
+
+def _render_learning():
+    """Learner vs frozen baseline, current params and the learning audit trail."""
+    from strategies import ALL_STRATEGIES
+
+    trading_mode = db.get_meta("trading_mode") or "?"
+    learner_book = "observe" if trading_mode == "OBSERVE" else "main"
+    learn_bal = db.get_latest_balance(book=learner_book) or {}
+    base_bal  = db.get_latest_balance(book="baseline") or {}
+    learn_eq  = learn_bal.get("total_balance", config.INITIAL_CAPITAL)
+    base_eq   = base_bal.get("total_balance", config.INITIAL_CAPITAL)
+    audit     = db.get_learning_audit(limit=300)
+    counts    = {d: sum(1 for r in audit if r["decision"] == d)
+                 for d in ("applied", "rejected", "rollback")}
+
+    notice = None
+    if trading_mode == "OBSERVE":
+        notice = dbc.Alert(
+            "Modo OBSERVACIÓN: ninguna estrategia pasó el backtest, así que no se abren "
+            "posiciones en el libro principal. Las operaciones de abajo son teóricas "
+            "(libro 'observe'). Para operar igualmente: ALLOW_UNVALIDATED_STRATEGIES=true.",
+            color="warning", style={"fontSize": "13px"})
+
+    diff = learn_eq - base_eq
+    cards = dbc.Row([
+        dbc.Col(_metric_card("Modo", trading_mode, "yellow",
+                             subtitle=f"libro que aprende: {learner_book}"), width=2),
+        dbc.Col(_metric_card("Equity: aprende", f"${learn_eq:,.2f}",
+                             "green" if learn_eq >= config.INITIAL_CAPITAL else "red"), width=2),
+        dbc.Col(_metric_card("Equity: baseline", f"${base_eq:,.2f}",
+                             "green" if base_eq >= config.INITIAL_CAPITAL else "red",
+                             subtitle="parámetros congelados"), width=2),
+        dbc.Col(_metric_card("Aprende − baseline", f"${diff:+,.2f}",
+                             "green" if diff >= 0 else "red"), width=2),
+        dbc.Col(_metric_card("Ajustes aplicados", str(counts["applied"]), "blue",
+                             subtitle=f"{counts['rollback']} revertidos"), width=2),
+        dbc.Col(_metric_card("Propuestas rechazadas", str(counts["rejected"]), "subtext"), width=2),
+    ], className="g-2 mb-3")
+
+    fig = go.Figure()
+    for book, label, color in ((learner_book, "Aprende", COLORS["blue"]),
+                               ("baseline", "Baseline (congelado)", COLORS["subtext"])):
+        hist = db.get_balance_history(days=90, include_backtest=True, book=book)
+        if hist:
+            df = pd.DataFrame(hist)
+            fig.add_trace(go.Scatter(x=df["recorded_at"], y=df["total_balance"],
+                                     name=label, line=dict(color=color, width=2)))
+    if fig.data:
+        fig.add_hline(y=config.INITIAL_CAPITAL, line_dash="dot", line_color=COLORS["border"])
+        fig.update_layout(**_dark_layout("Equity: aprende vs baseline"), height=300)
+    else:
+        fig = _empty_fig("Sin historial de equity todavía")
+
+    learn_bd = learn_bal.get("strategy_breakdown", {})
+    base_bd  = base_bal.get("strategy_breakdown", {})
+    param_rows = []
+    for S in ALL_STRATEGIES:
+        default = S()
+        saved = json.loads(db.get_meta(f"learned_params:{default.name}") or "{}")
+        for p, spec in default.TUNABLE_PARAMS.items():
+            current = saved.get(p, default.params[p])
+            param_rows.append({
+                "Estrategia": default.name,
+                "Parámetro": p,
+                "Actual (aprende)": current,
+                "Baseline": default.params[p],
+                "Rango": f"{spec.min} – {spec.max} (paso {spec.step})",
+                "Equity aprende": f"${learn_bd.get(default.name, {}).get('capital', 0):,.2f}",
+                "Equity baseline": f"${base_bd.get(default.name, {}).get('capital', 0):,.2f}",
+            })
+
+    audit_rows = []
+    for r in audit:
+        mb, ma = r["metrics_before"], r["metrics_after"]
+        audit_rows.append({
+            "Fecha (UTC)": (r["ts"] or "")[:16].replace("T", " "),
+            "Estrategia": r["strategy_name"],
+            "Parámetro": r["param"] or "",
+            "Antes → después": (f"{r['old_value']:g} → {r['new_value']:g}"
+                                if r["old_value"] is not None and r["new_value"] is not None
+                                else ""),
+            "Decisión": r["decision"],
+            "Motivo": r["reason"] or "",
+            "PF antes/después": (f"{mb.get('profit_factor', 0):.2f} / {ma.get('profit_factor', 0):.2f}"
+                                 if ma else ""),
+            "MaxDD antes/después": (f"{mb.get('max_drawdown', 0):.1%} / {ma.get('max_drawdown', 0):.1%}"
+                                    if ma else ""),
+            "Trades (valid.)": ma.get("trades", "") if ma else "",
+        })
+
+    decision_colors = [
+        {"if": {"filter_query": '{Decisión} = "applied"'}, "color": COLORS["green"]},
+        {"if": {"filter_query": '{Decisión} = "rollback"'}, "color": COLORS["red"]},
+        {"if": {"filter_query": '{Decisión} = "rejected"'}, "color": COLORS["subtext"]},
+    ]
+    return html.Div([
+        notice,
+        cards,
+        dcc.Graph(figure=fig, config={"displayModeBar": False}),
+        html.H6("Parámetros ajustables: actual vs baseline",
+                style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
+        _table(param_rows, page_size=12),
+        html.H6(f"Auditoría del aprendizaje ({len(audit_rows)} propuestas)",
+                style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
+        _table(audit_rows, conditional=decision_colors) if audit_rows else html.Div(
+            "Todavía no hay propuestas. El aprendizaje corre cada "
+            f"{config.LEARNING_INTERVAL_HOURS:g} h.", style={"color": COLORS["subtext"]}),
     ])
 
 
