@@ -65,6 +65,42 @@ def test_strategies_tab_shows_status_regimes_and_sources(temp_db):
     assert "tab-evaluation" in _dump(dash_app.app.layout)
 
 
+def test_control_tab_saves_settings_and_rejects_invalid_ones(temp_db):
+    from dashboard import app as dash_app
+    from risk_engine import RiskSettings
+    layout = _dump(dash_app._render_control())
+    for text in ("ctl-aggr", "ctl-budget", "ctl-funds", "ctl-mode", "ctl-save", "ctl-close-all"):
+        assert text in layout, text
+    msg = dash_app.save_risk_settings(1, 8, 1_000, 100, "trade", ["short"])
+    assert "Guardado" in _dump(msg)
+    s = RiskSettings.load()
+    assert (s.aggressiveness, s.funds, s.budget, s.mode, s.allow_short) == (8, 1_000, 100, "trade", True)
+    msg = dash_app.save_risk_settings(2, 8, 1_000, 5_000, "trade", [])
+    assert "no puede ser mayor" in _dump(msg)
+    assert RiskSettings.load().budget == 100                       # unchanged
+
+
+def test_control_preview_and_live_status(temp_db):
+    from dashboard import app as dash_app
+    from risk_engine import RiskEngine
+    preview = _dump(dash_app.preview_aggressiveness(2)) + _dump(dash_app.preview_aggressiveness(9))
+    assert "VIABLE" in preview and "EN_PRUEBA" in preview
+    db.set_meta("trading_mode", "OBSERVE")
+    RiskEngine("observe").reset_kill_switch()
+    db.set_meta("risk:observe:kill", '{"at": "x", "reason": "caida de 6 USD"}')
+    status = _dump(dash_app.update_control_status(0))
+    assert "freno" in status.lower() and "caida de 6 USD" in status
+    dash_app.request_close_all(1)
+    assert RiskEngine("observe").close_all_requested()
+
+
+def test_control_tab_is_not_rebuilt_by_the_auto_refresh(temp_db):
+    import dash
+    from dashboard import app as dash_app
+    assert dash_app.render_tab_for("tab-control", "interval-refresh") is dash.no_update
+    assert dash_app.render_tab_for("tab-control", "main-tabs") is not dash.no_update
+
+
 def test_learning_tab_is_registered():
     from dashboard import app as dash_app
     assert "tab-learning" in _dump(dash_app.app.layout)

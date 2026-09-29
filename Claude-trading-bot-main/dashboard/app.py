@@ -131,6 +131,7 @@ app.layout = dbc.Container(fluid=True, style={"backgroundColor": COLORS["bg"],
         dbc.Tab(label="Trade Journal",         tab_id="tab-journal"),
         dbc.Tab(label="Aprendizaje",           tab_id="tab-learning"),
         dbc.Tab(label="Estrategias",           tab_id="tab-evaluation"),
+        dbc.Tab(label="Control",               tab_id="tab-control"),
     ]),
 
     html.Div(id="tab-content", style={"padding": "12px 12px 30px"}),
@@ -238,6 +239,16 @@ def update_kpis(_):
     Input("interval-refresh", "n_intervals"),
 )
 def render_tab(active_tab, _):
+    ctx = dash.callback_context
+    trigger = ctx.triggered_id if ctx.triggered else None
+    return render_tab_for(active_tab, trigger)
+
+
+def render_tab_for(active_tab, trigger):
+    if active_tab == "tab-control":
+        # A form: rebuilding it every 10 s would wipe what the user is typing.
+        # Its live status box has its own refresh callback.
+        return dash.no_update if trigger == "interval-refresh" else _render_control()
     if active_tab == "tab-overview":
         return _render_overview()
     elif active_tab == "tab-strategies":
@@ -875,6 +886,154 @@ def _render_strategy_evaluation():
         html.H6("Detalle por estrategia", style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
         _table(rows, page_size=20, conditional=status_colors),
     ])
+
+
+# ─── Control: aggressiveness, budget, mode (risk_engine.py) ──────────────────
+
+def _learner_book() -> str:
+    return "observe" if db.get_meta("trading_mode") == "OBSERVE" else "main"
+
+
+def _render_control():
+    from risk_engine import RiskSettings
+    s = RiskSettings.load()
+    label = {"fontSize": "13px", "color": COLORS["subtext"], "marginBottom": "4px"}
+    form = dbc.Card(dbc.CardBody([
+        html.H6("Agresividad (1 = prudente, 10 = agresivo)", style={"color": COLORS["blue"]}),
+        dcc.Slider(id="ctl-aggr", min=1, max=10, step=1, value=s.aggressiveness,
+                   marks={i: str(i) for i in range(1, 11)}),
+        dbc.Row([
+            dbc.Col([html.Div("Fondos de la cuenta (paper, USD)", style=label),
+                     dbc.Input(id="ctl-funds", type="number", min=1, value=s.funds)], md=3),
+            dbc.Col([html.Div("Presupuesto que el bot puede usar (USD)", style=label),
+                     dbc.Input(id="ctl-budget", type="number", min=1, value=s.budget)], md=3),
+            dbc.Col([html.Div("Modo", style=label),
+                     dbc.RadioItems(id="ctl-mode", value=s.mode, inline=True, options=[
+                         {"label": "Operar", "value": "trade"},
+                         {"label": "Solo cierre", "value": "close_only"}])], md=3),
+            dbc.Col([html.Div("Cortos (ventas en corto)", style=label),
+                     dbc.Checklist(id="ctl-short", value=["short"] if s.allow_short else [],
+                                   options=[{"label": "Permitir", "value": "short"}], switch=True)], md=3),
+        ], className="g-3 my-2"),
+        dbc.Button("Guardar", id="ctl-save", color="primary", className="me-2"),
+        html.Div(id="ctl-save-msg", className="mt-2"),
+    ]), style={"backgroundColor": COLORS["card"], "border": f"1px solid {COLORS['border']}"})
+
+    actions = dbc.Card(dbc.CardBody([
+        html.H6("Acciones", style={"color": COLORS["blue"]}),
+        dbc.Button("Reactivar (quitar freno de emergencia)", id="ctl-reset-kill",
+                   color="secondary", className="me-2"),
+        dcc.ConfirmDialogProvider(
+            dbc.Button("Cerrar todas las posiciones ahora", color="danger"),
+            id="ctl-close-all",
+            message="¿Cerrar TODAS las posiciones del bot al precio actual y pasar a 'Solo cierre'? "
+                    "(paper trading, sin dinero real)"),
+        html.Div(id="ctl-reset-msg", className="mt-2"),
+        html.Div(id="ctl-close-msg", className="mt-2"),
+    ]), style={"backgroundColor": COLORS["card"], "border": f"1px solid {COLORS['border']}"})
+
+    return html.Div([
+        dbc.Alert("Paper trading: todo es simulado con precios reales de Binance. El presupuesto limita "
+                  "cuánto usa la versión que aprende; mayor agresividad = operaciones más grandes, más "
+                  "estrategias permitidas y límites de pérdida más amplios.",
+                  color="secondary", style={"fontSize": "13px"}),
+        html.Div(id="ctl-status", children=update_control_status(0)),
+        dbc.Row([dbc.Col(form, md=8), dbc.Col(actions, md=4)], className="g-2 my-2"),
+        html.H6("Qué significa este nivel", style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
+        html.Div(id="ctl-preview", children=preview_aggressiveness(s.aggressiveness)),
+    ])
+
+
+@app.callback(Output("ctl-preview", "children"), Input("ctl-aggr", "value"),
+              Input("ctl-budget", "value"), prevent_initial_call=True)
+def preview_aggressiveness(level, budget=None):
+    from risk_engine import RiskSettings, profile
+    p = profile(level or 1)
+    try:
+        budget = float(budget) if budget else RiskSettings.load().budget   # value being typed
+    except (TypeError, ValueError):
+        budget = RiskSettings.load().budget
+    rows = [
+        ("Riesgo por operación (pérdida si toca el stop)", f"{p['risk_per_trade']:.2%} = ${budget * p['risk_per_trade']:,.2f}"),
+        ("Tamaño máximo de una posición", f"{p['max_position']:.0%} = ${budget * p['max_position']:,.2f}"),
+        ("Posiciones abiertas a la vez", str(p["max_open"])),
+        ("Exposición máxima (suma de posiciones)", f"{p['max_exposure']:.0%} = ${budget * p['max_exposure']:,.2f}"),
+        ("Límite de pérdida diaria", f"{p['daily_loss']:.1%} = ${budget * p['daily_loss']:,.2f}"),
+        ("Freno de emergencia (caída desde el máximo)", f"{p['max_drawdown']:.0%} = ${budget * p['max_drawdown']:,.2f}"),
+        ("Confianza mínima de la señal", f"{p['min_confidence']:.2f}"),
+        ("Estrategias que puede usar", ", ".join(p["statuses"])),
+    ]
+    return _table([{"Parámetro": a, f"Nivel {p['level']} (presupuesto ${budget:,.0f})": b}
+                   for a, b in rows], page_size=10)
+
+
+@app.callback(Output("ctl-save-msg", "children"), Input("ctl-save", "n_clicks"),
+              State("ctl-aggr", "value"), State("ctl-funds", "value"), State("ctl-budget", "value"),
+              State("ctl-mode", "value"), State("ctl-short", "value"), prevent_initial_call=True)
+def save_risk_settings(_, aggr, funds, budget, mode, short):
+    from risk_engine import RiskSettings
+    try:
+        RiskSettings(funds=float(funds or 0), budget=float(budget or 0), aggressiveness=int(aggr or 0),
+                     mode=mode, allow_short="short" in (short or [])).save()
+    except (ValueError, TypeError) as e:
+        return dbc.Alert(f"No se guardó: {e}", color="danger")
+    return dbc.Alert("Guardado. El bot lo aplica en menos de 30 segundos.", color="success")
+
+
+@app.callback(Output("ctl-reset-msg", "children"), Input("ctl-reset-kill", "n_clicks"),
+              prevent_initial_call=True)
+def reset_kill_switch(_):
+    from risk_engine import RiskEngine
+    RiskEngine(_learner_book()).reset_kill_switch()
+    return dbc.Alert("Freno quitado: el bot vuelve a poder abrir posiciones.", color="success")
+
+
+@app.callback(Output("ctl-close-msg", "children"), Input("ctl-close-all", "submit_n_clicks"),
+              prevent_initial_call=True)
+def request_close_all(_):
+    from risk_engine import RiskEngine
+    RiskEngine(_learner_book()).request_close_all()
+    return dbc.Alert("Pedido enviado: el bot cierra todo en menos de 30 s y pasa a 'Solo cierre'.",
+                     color="warning")
+
+
+@app.callback(Output("ctl-status", "children"), Input("interval-refresh", "n_intervals"))
+def update_control_status(_):
+    """Live risk state read from the DB (the bot refreshes it every ~20 s)."""
+    from risk_engine import RiskSettings, profile
+    s = RiskSettings.load()
+    p = profile(s.aggressiveness)
+    book = _learner_book()
+    positions = db.get_open_positions(book=book)
+    exposure = sum(float(x["entry_price"]) * float(x["quantity"]) for x in positions)
+    unreal = 0.0
+    if positions:
+        try:
+            price = _get_price_fetcher().get_current_price(config.SYMBOL)
+            unreal = sum(((price - x["entry_price"]) if x["side"] == "LONG" else (x["entry_price"] - price))
+                         * x["quantity"] for x in positions)
+        except Exception:
+            pass
+    pnl = float(db.get_trade_stats(book=book).get("total_pnl") or 0) + unreal
+    day = json.loads(db.get_meta(f"risk:{book}:day") or "{}")
+    day_pnl = pnl - day["start_pnl"] if day else 0.0
+    kill = json.loads(db.get_meta(f"risk:{book}:kill") or "null")
+    mode = "⛔ FRENO DE EMERGENCIA" if kill else ("Solo cierre" if s.mode == "close_only" else "Operar")
+    daily_limit = p["daily_loss"] * s.budget
+    cards = dbc.Row([
+        dbc.Col(_metric_card("Modo", mode, "red" if kill else ("yellow" if s.mode == "close_only" else "green"),
+                             subtitle=f"agresividad {p['level']}/10"), width=3),
+        dbc.Col(_metric_card("P&L total", f"${pnl:+,.2f}", "green" if pnl >= 0 else "red",
+                             subtitle=f"{pnl / s.budget:+.2%} del presupuesto ${s.budget:,.0f}"), width=3),
+        dbc.Col(_metric_card("P&L de hoy", f"${day_pnl:+,.2f}", "green" if day_pnl >= 0 else "red",
+                             subtitle=f"límite diario -${daily_limit:,.2f}"), width=3),
+        dbc.Col(_metric_card("Presupuesto en uso", f"${exposure:,.2f}", "blue",
+                             subtitle=f"de ${p['max_exposure'] * s.budget:,.2f} · {len(positions)}/{p['max_open']} posiciones"),
+                width=3),
+    ], className="g-2")
+    alert = dbc.Alert(f"Freno de emergencia activado: {kill['reason']}. No abre posiciones nuevas hasta que "
+                      "pulses 'Reactivar'.", color="danger") if kill else None
+    return html.Div([alert, cards])
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
