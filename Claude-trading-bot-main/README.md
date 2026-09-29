@@ -2,10 +2,11 @@
   <img src="assets/btc-trading-bot-banner.svg" alt="BTC Autonomous Trading Bot" width="100%" />
 </p>
 
-# BTC Autonomous Trading Bot
+# BTC Paper Trading Bot (educational)
 
-Autonomous multi-strategy BTC/USDT trading bot with backtesting, live execution,
-self-learning, and a real-time Dash dashboard.
+Multi-strategy BTC/USDT **paper-trading** bot on real Binance Spot prices, with a
+startup backtest, safe self-learning against frozen baselines, and a Dash dashboard.
+Educational project: it does not prove profitability and must not trade real money.
 
 ---
 
@@ -13,121 +14,132 @@ self-learning, and a real-time Dash dashboard.
 
 | Feature | Detail |
 |---|---|
-| Strategies | 5 independent strategies (RSI+BB, MACD, EMA Cross, Breakout, ML Adaptive) |
-| Backtesting | 500-day walk-forward test; only strategies ≥50% CAGR are activated |
-| Execution | Binance REST API (Spot); Testnet by default |
-| Self-learning | RandomForest model trained on closed trades; parameter auto-tuning |
-| Dashboard | Dash app: equity curve, positions, trade history, journal |
-| Capital | Starts with $10,000 split equally across active strategies |
+| Market data | Real Binance public REST API (no keys). **No simulated-data fallback**: without Binance access the bot exits. |
+| Execution | Paper trading at live prices (fee 0.1% + slippage 0.03%) |
+| Strategies | 8 registered strategies on 1d / 4h candles (see below) |
+| Backtest | 500 days of real candles at startup |
+| Activation | CAGR ≥ 30%, win rate ≥ 38%, profit factor ≥ 1.2 **and** ≥ `MIN_BACKTEST_TRADES` (30) trades |
+| If none pass | **Observation mode** (default) or trade all with `ALLOW_UNVALIDATED_STRATEGIES=true` |
+| Self-learning | One small, walk-forward-validated parameter change at a time, audited, with automatic rollback. No LLM. |
+| Baseline | Every active strategy has a frozen default-parameter copy trading the same signals |
+| Dashboard | Dash app on port 8050 (no login — keep it on localhost) |
 
 ---
 
-## Quick Start
+## Strategies (`strategies/__init__.py → ALL_STRATEGIES`)
 
-### 1. Install dependencies
+| Strategy | Candles | Idea |
+|---|---|---|
+| EMA5_Momentum | 1d | Close crosses the 5-period EMA |
+| DualMA_Crossover | 1d | SMA-100 / SMA-250 golden / death cross |
+| Regime_RiskOnOff | 4h | EMA-200 + MACD + RSI must agree |
+| PriceMomentum_25 | 1d | 25-day close-to-close momentum |
+| Residual_MeanRev | 4h | Z-score of residual vs rolling log-price trend |
+| Donchian_Breakout | 1d | 15-day Donchian breakout while ADX is calm |
+| Blended_MomentumMR | 4h | 50/50 momentum + RSI/Bollinger mean reversion |
+| BTC_MomentumBreakout | 1d | Breakout above 20-day high in a bull regime, volume-confirmed |
+
+`ml_adaptive.py`, `rsi_bollinger.py`, `macd_momentum.py`, `ema_crossover.py` and
+`breakout.py` exist but are **not registered** (they have not passed a backtest).
+
+In the last 500-day backtest (Sept 2026) **none of the 8 strategies passed** the
+thresholds, so by default the bot runs in observation mode.
+
+---
+
+## Quick start (local)
 
 ```bash
-cd btc_trading_bot
+cd Claude-trading-bot-main
+python3.11 -m venv venv && . venv/bin/activate     # Windows: py -3.11 -m venv venv; venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env        # safe demo defaults, no API keys
+python -m pytest -q         # tests
+python run_backtest_only.py # backtest table + backtest_results.html
+python main.py              # bot + dashboard at http://localhost:8050
 ```
 
-### 2. Configure API keys
+All variables are documented in [`.env.example`](.env.example). Keep
+`PAPER_TRADING=true`; leave all API keys empty.
+
+If `https://api.binance.com` returns HTTP 451 in your region, set
+`BINANCE_PUBLIC_BASE=https://data-api.binance.vision` (official public mirror).
+
+## Server (Docker)
 
 ```bash
-cp .env.example .env
-# Edit .env with your Binance API keys
-# Leave USE_TESTNET=true until you're confident
+mkdir -p data models && cp .env.example .env
+docker compose up -d --build
+docker compose logs --tail 50
 ```
 
-Get **Testnet** keys (free, no real funds) at:
-https://testnet.binance.vision/
-
-### 3. Run backtest only (recommended first step)
-
-```bash
-python run_backtest_only.py
-```
-
-This prints a summary table and saves `backtest_results.html` with equity curves.
-
-### 4. Start the full bot + dashboard
-
-```bash
-python main.py
-```
-
-Dashboard opens at: **http://localhost:8050**
+- The DB (`trading_bot.db` + `-wal`/`-shm`) and `trading_bot.log` live in `./data`
+  (`DATA_DIR=/app/data`). Mount the folder, not the single `.db` file.
+- The dashboard is published on **127.0.0.1:8050 only** (Docker bypasses ufw and
+  the dashboard has no login). View it with an SSH tunnel:
+  `ssh -L 8050:localhost:8050 user@server` → http://localhost:8050
 
 ---
 
-## Architecture
+## Trading modes and paper books
 
-```
-main.py                  ← Orchestrator; launches all threads
-├── backtester.py        ← 500-day vectorised backtest
-├── portfolio_manager.py ← Position sizing, order execution, SL/TP
-├── learning_engine.py   ← ML training, param tuning, journal entries
-├── binance_client.py    ← Binance REST wrapper (demo fallback)
-├── strategies/
-│   ├── rsi_bollinger.py ← Mean-reversion (RSI + Bollinger Bands)
-│   ├── macd_momentum.py ← Trend-following (MACD crossover)
-│   ├── ema_crossover.py ← Golden/Death cross (EMA 9/21)
-│   ├── breakout.py      ← Volume-confirmed price breakouts
-│   └── ml_adaptive.py   ← RandomForest trained on live trade history
-├── dashboard/app.py     ← Dash web dashboard (port 8050)
-├── database.py          ← SQLite persistence layer
-└── utils/indicators.py  ← Technical indicator calculations (ta library)
-```
+Positions, trades and balances are stored per **book**:
+
+| Book | What it is |
+|---|---|
+| `main` | What the bot trades (only validated strategies, or all with `ALLOW_UNVALIDATED_STRATEGIES=true`) |
+| `observe` | Observation mode: theoretical trades with simulated fills, no orders at all |
+| `baseline` | Frozen default-parameter copy of each active strategy, own virtual capital |
+
+The mode (`TRADE`, `TRADE_UNVALIDATED`, `OBSERVE`) is shown in the dashboard header.
+Every processed signal is logged in `signal_log` (acted on or not, and why). A
+signal on a closed candle is acted on once per strategy (the loop re-checks every 60 s).
 
 ---
 
-## Dashboard Tabs
+## Safe self-learning (`adaptive_tuner.py`)
 
-1. **Portfolio Overview** – Total balance, equity curve, drawdown, capital allocation pie
-2. **Strategy Performance** – Per-strategy metrics table + individual equity curves
-3. **Open Positions** – Live table with unrealized P&L (refreshes every 15 s)
-4. **Trade History** – Filterable/sortable trade log + cumulative P&L + P&L histogram
-5. **Trade Journal** – Per-trade entries with setup description, outcome analysis,
-   machine-generated reflection, and lessons learned
+Each strategy declares its tunable parameters with hard limits
+(`TUNABLE_PARAMS = {"ema_period": ParamSpec(min=3, max=12, step=1), ...}`);
+nothing else can change. Every `LEARNING_INTERVAL_HOURS` (24), if there are enough
+new trades or days of data, for each strategy:
+
+1. Pick ONE tunable (round-robin) and try value ± one step on the **proposal window**
+   (180 days ending 180 days ago). The best neighbour must beat the current value.
+2. Re-test it on the **validation window** (the last 180 days, not used in step 1).
+   Apply only with ≥ 10 trades, profit factor ≥ +5% and > 1, max drawdown at most +2 pts.
+3. After 72 h compare the equity change of the learning strategy with its frozen
+   baseline; if it lagged by more than 2% of equity, **roll back** automatically.
+
+Limits: 1 change per strategy per day, hard min/max, no new proposal while a change
+is under evaluation. Learned values survive restarts. Every proposal (applied /
+rejected / rollback, reason, metrics before/after) is stored in `learning_audit` and
+shown in the dashboard tab **Aprendizaje**. No LLM or `ANTHROPIC_API_KEY` is involved
+(`ANTHROPIC_API_KEY` only rewrites journal reflections, optionally).
+
+Caveat: walk-forward validation on 180 days of 1d candles has few trades; most
+proposals are rejected for that reason, and an accepted change can still be overfit.
 
 ---
 
-## Self-Improvement Mechanism
+## Risk management (`config.py`)
 
-After each closed trade:
-1. **Feature vector** extracted (RSI, BB%, MACD histogram, volume ratio, ADX, ATR, EMA alignment, etc.)
-2. **Outcome** (win=1 / loss=0) recorded with trade ID
-3. **ML_Adaptive** strategy retrains a `RandomForestClassifier` every 10 new samples
-4. **Classifier confidence** is used to scale position size (higher confidence → larger position)
-5. **Parameter tuning**: if recent 20-trade win rate drops below 38%, strategy parameters
-   are nudged (e.g., RSI thresholds tightened, volume multiplier raised)
-6. **Journal entry** generated with reflection text and lessons
-
----
-
-## Risk Management
-
-- Stop-loss: 2.5% per trade (ATR-based for MACD and EMA strategies)
-- Take-profit: 5.5% per trade (3–4× ATR for some strategies)
-- Max position size: 40% of strategy capital
-- Max drawdown guard: pauses new entries if strategy drops 20% from peak
-- ML confidence filter: skips trades below 42% predicted win probability
+- Stop-loss / take-profit: ATR-based per strategy (fallback 2.5% / 5.5%)
+- Max position size: **35%** of strategy capital (`MAX_POSITION_PCT`)
+- Drawdown guard: pauses new entries if a strategy's **equity** (free + committed +
+  unrealized) drops 20% from its peak
+- Confidence filter: skips trades with ML confidence < 0.40 or signal confidence < 0.42
 - Max 2 simultaneous positions per strategy
 
----
+## Dashboard tabs
 
-## Demo Mode
-
-If no Binance API keys are provided the bot runs in **demo mode**:
-- Price data is generated via Geometric Brownian Motion (realistic BTC dynamics)
-- Orders are simulated locally with Binance-equivalent fees (0.1%)
-- All other features (dashboard, learning, journal) function identically
+Portfolio Overview · Strategy Performance · Open Positions · Trade History ·
+Trade Journal · **Aprendizaje** (learner vs baseline, parameters, learning audit)
 
 ---
 
 ## Disclaimer
 
-This software is for educational purposes. Cryptocurrency trading involves
-significant financial risk. Past performance (including backtested results)
-does not guarantee future returns. Never trade with funds you cannot afford to lose.
-Always start with testnet before enabling live trading.
+Educational software. Backtests and paper results do not guarantee future returns and
+short tests (days, few trades) are not statistically meaningful. Never trade with funds
+you cannot afford to lose.
