@@ -94,6 +94,15 @@ def test_enrich_joins_without_looking_ahead(temp_db):
     assert list(df.columns) == ["close"]                                  # input untouched
 
 
+def test_mixed_timestamp_formats_are_read(temp_db):
+    """Real Binance funding times are sometimes 1 ms past the hour (…00.001)."""
+    from market_data import _store, load_series
+    _store("BTCUSDT", "funding_rate", [("2022-05-14T08:00:00+00:00", 0.0001),
+                                        ("2022-05-14T16:00:00.001000+00:00", 0.0002)])
+    s = load_series("BTCUSDT", "funding_rate")
+    assert len(s) == 2 and s.iloc[-1] == pytest.approx(0.0002)
+
+
 def test_enrich_without_any_data_adds_nan_columns(temp_db):
     from market_data import METRICS, enrich
     idx = pd.date_range("2026-01-01", periods=3, freq="1D", tz="UTC")

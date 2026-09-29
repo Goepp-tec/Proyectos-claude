@@ -76,7 +76,8 @@ def load_series(symbol: str, metric: str) -> pd.Series:
     ).fetchall()
     if not rows:
         return pd.Series(dtype=float)
-    idx = pd.to_datetime([r[0] for r in rows], utc=True)
+    # ISO8601: Binance funding times are sometimes '…:00.001' and sometimes ':00'
+    idx = pd.to_datetime([r[0] for r in rows], utc=True, format="ISO8601")
     return pd.Series([r[1] for r in rows], index=idx, name=metric)
 
 
