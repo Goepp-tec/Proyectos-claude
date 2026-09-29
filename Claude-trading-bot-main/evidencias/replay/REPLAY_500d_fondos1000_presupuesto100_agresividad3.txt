@@ -1,0 +1,115 @@
+NOTA: la linea 'Aprende vs baseline: equity ... USD' de este reporte comparaba dolares con capitales distintos (presupuesto 100 vs fondos 1000); corregido en 290eb2c. Comparar la columna 'Retorno total'.
+
+REPLAY HISTORICO ACELERADO — APRENDE vs BASELINE
+========================================================================
+Generado        : 2026-09-29 07:52 UTC
+Periodo         : 2025-05-17 07:00 -> 2026-09-29 07:00 UTC (500 dias)
+Datos           : https://api.binance.com (velas reales BTCUSDT 1h/4h/1d)
+Fondos (paper)  : $1,000  (capital de LAB y BASELINE)
+Presupuesto     : $100  (capital de APRENDE)  |  agresividad 3/10: riesgo/operacion 0.86%, max 3 posiciones, limite diario 2.6%, freno 11%, opera: VIABLE
+BTC buy & hold  : -18.82% en el mismo periodo (referencia)
+Evaluador       : cada 168 h de tiempo simulado (en vivo: cada 24 h); tuner cada 24 h
+Duracion calculo: 16.9 min
+
+APRENDE  = 8 registradas + 9 del catalogo; solo opera lo que el evaluador aprueba
+           para esta agresividad; tamano y limites del motor de riesgo sobre el
+           PRESUPUESTO; parametros del tuner. Sus % son sobre el presupuesto.
+LAB      = las mismas 17 sin filtro (menos las DESCARTADAS): la evidencia en vivo
+BASELINE = las 8 originales con parametros por defecto congelados, sin filtro
+
+Metrica                                   APRENDE            LAB       BASELINE
+-------------------------------------------------------------------------------
+Retorno total                              +1.55%         -0.64%         -4.14%
+CAGR                                       +1.13%         -0.47%         -3.04%
+Max drawdown                                4.20%          1.66%          5.38%
+Profit factor                                1.22           0.92           0.83
+Win rate                                    63.0%          37.9%          31.0%
+Numero de trades                               27            317            452
+Sharpe simple (diario, anualiz.)             0.39          -0.37          -0.94
+Equity final                              $101.55        $993.56        $958.63
+Fees pagadas                                $1.28         $11.44         $29.56
+
+Aprende vs baseline: equity -857.08 USD -> NO supero al baseline.
+  OJO: hizo 27 trades vs 452 del baseline; buena parte de la
+  diferencia viene de operar menos (el filtro evita estrategias no viables).
+
+MOTOR DE RIESGO (libro que aprende)
+  Freno de emergencia: no se activo
+  Entradas bloqueadas por riesgo:
+        5 x riesgo: maximo de 3 posiciones abiertas
+        3 x riesgo: confianza 0.48 < 0.56
+        1 x riesgo: confianza 0.45 < 0.56
+        1 x riesgo: confianza 0.46 < 0.56
+        1 x riesgo: confianza 0.47 < 0.56
+        1 x riesgo: confianza 0.50 < 0.56
+        1 x riesgo: confianza 0.51 < 0.56
+        1 x riesgo: confianza 0.53 < 0.56
+
+EQUITY FINAL POR ESTRATEGIA (aprende / lab / baseline) Y CALIFICACION FINAL
+Estrategia               Aprende       Lab  Baseline  Estado       Punt.  Motivo
+EMA5_Momentum               4.31     59.56    116.77  EN_PRUEBA     0.12  ambas direcciones pierden
+DualMA_Crossover            5.88     61.55    129.97  EN_PRUEBA     0.05  pocos trades (2 < 30) para decidir
+Regime_RiskOnOff            5.88     59.43    109.83  DESCARTADA    0.00  pierde de forma consistente: 105 trades, PF 0.80, rentable en 1/4 vent
+PriceMomentum_25            5.88     62.08    125.26  EN_PRUEBA     0.53  pocos trades (18 < 30) para decidir
+Residual_MeanRev            5.88     58.82    118.39  DESCARTADA    0.00  pierde de forma consistente: 160 trades, PF 0.81, rentable en 0/4 vent
+Donchian_Breakout           5.88     54.56    117.49  EN_PRUEBA     0.43  pocos trades (24 < 30) para decidir
+Blended_MomentumMR          5.88     57.02    116.54  DESCARTADA    0.00  pierde de forma consistente: 52 trades, PF 0.86, rentable en 1/4 venta
+BTC_MomentumBreakout        5.88     58.26    124.38  CONDICIONAL   0.26  en conjunto no es viable (12 trades < 30, rentable en 2/4 ventanas), p
+RSI_Bollinger               6.91     56.02         -  DESCARTADA    0.00  pierde de forma consistente: 85 trades, PF 0.86, rentable en 1/4 venta
+MACD_Momentum               5.88     56.15         -  DESCARTADA    0.00  pierde en vivo (58 trades, PF 0.67) y en historico (PF 0.94)
+EMA_Crossover               5.88     56.41         -  DESCARTADA    0.00  pierde de forma consistente: 350 trades, PF 0.89, rentable en 1/4 vent
+Breakout                    5.88     58.82         -  DESCARTADA    0.00  pierde de forma consistente: 118 trades, PF 0.88, rentable en 1/4 vent
+Turtle_Breakout             5.88     56.24         -  CONDICIONAL   0.53  en conjunto no es viable (29 trades < 30, rentable en 2/4 ventanas), p
+Connors_RSI2                5.88     57.89         -  EN_PRUEBA     0.24  resultados mixtos: PF 0.99, rentable en 1/4 ventanas
+Bollinger_Squeeze           5.88     60.02         -  DESCARTADA    0.00  pierde en vivo (27 trades, PF 0.64) y en historico (PF 0.93)
+Supertrend                  7.97     59.37         -  CONDICIONAL   0.32  en conjunto no es viable (PF 0.91 < 1.2, rentable en 2/4 ventanas), pe
+Golden_Cross_50_200         5.88     61.35         -  EN_PRUEBA     0.15  pocos trades (5 < 30) para decidir
+Evaluaciones realizadas: 819
+  descartada el 2025-05-17: Residual_MeanRev
+  descartada el 2025-05-17: Breakout
+  descartada el 2025-05-24: Regime_RiskOnOff
+  descartada el 2025-06-28: EMA_Crossover
+  descartada el 2025-08-30: MACD_Momentum
+  descartada el 2025-12-13: Bollinger_Squeeze
+  descartada el 2026-05-30: RSI_Bollinger
+  descartada el 2026-06-20: Blended_MomentumMR
+
+APRENDIZAJE: 2882 propuestas -> 12 aplicadas, 2869 rechazadas, 1 revertidas (rollback)
+Motivos de rechazo mas frecuentes:
+   1308 x ningun vecino mejora la ventana de propuesta
+   1211 x validacion: pocos trades
+    350 x validacion: profit factor no mejora lo suficiente
+Cambios aplicados / revertidos (orden cronologico):
+  2025-05-20  applied  Blended_MomentumMR     atr_tp_mult       3.8 -> 3.3   validation PF 0.53->1.31, maxDD 5.6%->2.3%, 15 trades
+  2025-06-17  applied  EMA5_Momentum          atr_sl_mult       1.5 -> 1.25   validation PF 1.12->1.21, maxDD 5.9%->5.0%, 11 trades
+  2025-06-22  applied  EMA5_Momentum          atr_sl_mult       1.25 -> 1   validation PF 0.89->1.05, maxDD 5.2%->4.0%, 12 trades
+  2025-07-01  applied  EMA5_Momentum          atr_tp_mult       3.5 -> 4   validation PF 1.06->1.31, maxDD 4.0%->4.0%, 10 trades
+  2025-09-10  applied  EMA5_Momentum          atr_tp_mult       4 -> 4.5   validation PF 1.08->1.19, maxDD 3.8%->3.8%, 10 trades
+  2025-10-06  applied  Donchian_Breakout      atr_sl_mult       1.5 -> 1.25   validation PF 0.97->1.15, maxDD 4.8%->4.1%, 10 trades
+  2025-11-20  applied  EMA5_Momentum          atr_tp_mult       4.5 -> 5   validation PF 1.09->1.20, maxDD 2.3%->2.3%, 11 trades
+  2025-11-25  applied  EMA5_Momentum          atr_tp_mult       5 -> 5.5   validation PF 1.36->1.44, maxDD 2.3%->2.3%, 10 trades
+  2025-11-28  rollback EMA5_Momentum          atr_tp_mult       5.5 -> 5   after 72h learner +0.00 vs baseline +0.29 (tolerance 0.12)
+  2025-11-29  applied  EMA5_Momentum          ema_period        5 -> 6   validation PF 0.51->1.69, maxDD 3.6%->2.2%, 10 trades
+  2026-03-07  applied  Blended_MomentumMR     rsi_oversold      38 -> 39   validation PF 1.34->2.01, maxDD 2.2%->1.4%, 15 trades
+  2026-04-23  applied  Blended_MomentumMR     rsi_overbought    62 -> 63   validation PF 1.39->1.48, maxDD 2.7%->2.6%, 14 trades
+  2026-06-06  applied  Blended_MomentumMR     atr_tp_mult       3.3 -> 3.8   validation PF 1.44->1.59, maxDD 3.0%->3.0%, 10 trades
+Parametros finales (aprende) distintos del baseline:
+  EMA5_Momentum: {'ema_period': 6, 'atr_sl_mult': 1.0, 'atr_tp_mult': 5.0}
+  Donchian_Breakout: {'atr_sl_mult': 1.25}
+  Blended_MomentumMR: {'rsi_oversold': 39, 'rsi_overbought': 63}
+
+ADVERTENCIAS (leer)
+- Es un REPLAY/BACKTEST sobre datos pasados, no evidencia en vivo.
+- Riesgo de sobreajuste: los parametros y umbrales se eligieron mirando datos
+  historicos; un buen resultado aqui no garantiza nada hacia adelante.
+- SL/TP se simulan con un recorrido intra-hora (apertura->min/max->cierre);
+  el orden real dentro de la hora puede diferir. Fills simulados con
+  slippage 0.03% y fee 0.1%; sin spread real ni latencia.
+- El evaluador califica con backtests de los ~2 anos ANTERIORES a cada fecha
+  simulada (nunca con datos futuros), pero los umbrales del evaluador y el
+  catalogo se eligieron hoy: sigue habiendo riesgo de sesgo de seleccion.
+- Aprende y lab reparten el capital entre 17 estrategias y el baseline entre 8:
+  compare el equity TOTAL, no por estrategia.
+- Profit factor y win rate con pocos trades no son estadisticamente fiables.
+- Indicadores calculados una vez sobre toda la historia (en vivo: sobre la
+  ventana de 600 velas); diferencias minimas en EMAs largas.
