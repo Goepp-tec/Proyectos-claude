@@ -87,10 +87,12 @@ def fetch_data(replay_days: int, cache_dir: str) -> dict:
 
 def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
                learning: bool = True, progress=None, eval_interval_hours: float = None,
-               funds: float = None, budget: float = None, aggressiveness: int = None) -> dict:
+               funds: float = None, budget: float = None, aggressiveness: int = None,
+               collect_market: bool = True) -> dict:
     import main
     from adaptive_tuner import AdaptiveTuner
     from learning_engine import LearningEngine
+    from market_data import MarketDataCollector, enrich
     from risk_engine import RiskEngine, RiskSettings
     from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES
     from strategy_evaluator import StrategyEvaluator
@@ -109,6 +111,13 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
                             budget=float(budget or config.INITIAL_CAPITAL * 0.10),
                             aggressiveness=int(aggressiveness or config.RISK_AGGRESSIVENESS))
     settings.save()
+
+    # Free market data (funding and Fear & Greed have years of history; the
+    # futures ratios only the last 30 days), joined to every candle as of its
+    # close time — strategies never see a value published after the candle.
+    if collect_market:
+        MarketDataCollector(config.SYMBOL).update(force=True)
+    data = {iv: enrich(df, config.SYMBOL, iv) for iv, df in data.items()}
 
     clock = {"now": start}
     iso_clock = lambda: clock["now"].isoformat()

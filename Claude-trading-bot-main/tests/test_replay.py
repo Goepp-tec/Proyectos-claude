@@ -51,7 +51,7 @@ def test_replay_runs_both_books_offline_and_keeps_baseline_frozen(tmp_path, monk
     with patch("requests.get", side_effect=AssertionError("network")), \
          patch("requests.post", side_effect=AssertionError("network")):
         res = run_replay(data, start, end, db_path=str(tmp_path / "replay.db"),
-                         funds=1_000, budget=100, aggressiveness=8)
+                         funds=1_000, budget=100, aggressiveness=8, collect_market=False)
 
     assert res["metrics"]["learn"]["equity_start"] == pytest.approx(100)       # the budget
     for book in ("lab", "baseline"):
