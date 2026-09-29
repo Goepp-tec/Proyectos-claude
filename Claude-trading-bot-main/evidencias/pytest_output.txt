@@ -1,0 +1,52 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- /home/user/Proyectos-claude/Claude-trading-bot-main/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/user/Proyectos-claude/Claude-trading-bot-main
+configfile: pytest.ini
+testpaths: tests
+plugins: dash-4.4.1
+collecting ... collected 12 items
+
+tests/test_trading_bot.py::TestIndicators::test_rsi_calculation PASSED   [  8%]
+tests/test_trading_bot.py::TestIndicators::test_ema_calculation PASSED   [ 16%]
+tests/test_trading_bot.py::TestIndicators::test_atr_calculation PASSED   [ 25%]
+tests/test_trading_bot.py::TestBinanceClient::test_order_validation_btc PASSED [ 33%]
+tests/test_trading_bot.py::TestBinanceClient::test_order_validation_eth PASSED [ 41%]
+tests/test_trading_bot.py::TestMLAdaptiveStrategy::test_caution_level_calculation FAILED [ 50%]
+tests/test_trading_bot.py::TestMLAdaptiveStrategy::test_learn_from_lessons FAILED [ 58%]
+tests/test_trading_bot.py::TestLearningEngine::test_confidence_adjustment PASSED [ 66%]
+tests/test_trading_bot.py::TestPortfolioManager::test_position_sizing PASSED [ 75%]
+tests/test_trading_bot.py::TestUtils::test_utc_now PASSED                [ 83%]
+tests/test_trading_bot.py::TestDatabase::test_db_connection PASSED       [ 91%]
+tests/test_trading_bot.py::TestDatabase::test_journal_entry_retrieval PASSED [100%]
+
+=================================== FAILURES ===================================
+____________ TestMLAdaptiveStrategy.test_caution_level_calculation _____________
+tests/test_trading_bot.py:88: in test_caution_level_calculation
+    from strategies.ml_adaptive import MLAdaptiveStrategy
+E     File "/home/user/Proyectos-claude/Claude-trading-bot-main/strategies/ml_adaptive.py", line 199
+E       )
+E       ^
+E   SyntaxError: unmatched ')'
+________________ TestMLAdaptiveStrategy.test_learn_from_lessons ________________
+tests/test_trading_bot.py:114: in test_learn_from_lessons
+    from strategies.ml_adaptive import MLAdaptiveStrategy
+E     File "/home/user/Proyectos-claude/Claude-trading-bot-main/strategies/ml_adaptive.py", line 199
+E       )
+E       ^
+E   SyntaxError: unmatched ')'
+=============================== warnings summary ===============================
+tests/test_trading_bot.py::TestBinanceClient::test_order_validation_btc
+tests/test_trading_bot.py::TestBinanceClient::test_order_validation_btc
+  /home/user/Proyectos-claude/Claude-trading-bot-main/venv/lib/python3.11/site-packages/binance/ws/websocket_api.py:4: DeprecationWarning: websockets.WebSocketClientProtocol is deprecated
+    from websockets import WebSocketClientProtocol  # type: ignore
+
+tests/test_trading_bot.py::TestBinanceClient::test_order_validation_btc
+  /home/user/Proyectos-claude/Claude-trading-bot-main/venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_trading_bot.py::TestMLAdaptiveStrategy::test_caution_level_calculation
+FAILED tests/test_trading_bot.py::TestMLAdaptiveStrategy::test_learn_from_lessons
+=================== 2 failed, 10 passed, 3 warnings in 1.55s ===================

@@ -1,0 +1,39 @@
+2026-09-29 01:38:59,122 [INFO    ] ✓ Binance public API connected. Server time: 2026-09-29 01:38:59 UTC
+2026-09-29 01:38:59,124 [INFO    ] WebSocket client started
+2026-09-29 01:38:59,124 [INFO    ] WebSocket enabled for real-time prices
+2026-09-29 01:38:59,124 [INFO    ] Execution mode: PAPER TRADING (real Binance market data)
+2026-09-29 01:38:59,124 [INFO    ] Running 500-day backtest for 8 strategies…
+2026-09-29 01:38:59,125 [INFO    ] Running backtests for 8 strategies over 500 days...
+2026-09-29 01:38:59,125 [INFO    ] Fetching 500-day history (1d)...
+2026-09-29 01:38:59,487 [INFO    ] Fetched 500 1d candles for BTCUSDT (500d history)
+2026-09-29 01:38:59,563 [INFO    ] [✗ FAIL] EMA5_Momentum: CAGR=-1.6% | WinRate=38.1% | PF=0.87 | MaxDD=5.3% | Trades=21
+2026-09-29 01:38:59,675 [INFO    ] [✗ FAIL] DualMA_Crossover: CAGR=0.0% | WinRate=0.0% | PF=0.00 | MaxDD=0.0% | Trades=0
+2026-09-29 01:38:59,675 [INFO    ] Fetching 500-day history (4h)...
+2026-09-29 01:39:01,284 [INFO    ] Fetched 3000 4h candles for BTCUSDT (500d history)
+2026-09-29 01:39:01,514 [INFO    ] [✗ FAIL] Regime_RiskOnOff: CAGR=3.7% | WinRate=37.1% | PF=1.29 | MaxDD=6.4% | Trades=70
+2026-09-29 01:39:01,544 [INFO    ] [✗ FAIL] PriceMomentum_25: CAGR=6.6% | WinRate=50.0% | PF=3.32 | MaxDD=1.9% | Trades=10
+2026-09-29 01:39:04,780 [INFO    ] [✗ FAIL] Residual_MeanRev: CAGR=1.5% | WinRate=38.8% | PF=1.16 | MaxDD=5.4% | Trades=116
+2026-09-29 01:39:04,875 [INFO    ] [✗ FAIL] Donchian_Breakout: CAGR=-3.5% | WinRate=21.4% | PF=0.58 | MaxDD=8.3% | Trades=14
+2026-09-29 01:39:05,166 [INFO    ] [✗ FAIL] Blended_MomentumMR: CAGR=-1.1% | WinRate=32.0% | PF=0.91 | MaxDD=4.6% | Trades=25
+2026-09-29 01:39:05,274 [INFO    ] [✗ FAIL] BTC_MomentumBreakout: CAGR=1.6% | WinRate=100.0% | PF=3177697028.15 | MaxDD=0.0% | Trades=1
+
+================================================================================
+Strategy                   CAGR   WinRate  ProfFactor    MaxDD  Trades   Status
+--------------------------------------------------------------------------------
+EMA5_Momentum             -1.6%      38.1%        0.87      5.3%      21    ✗ FAIL
+DualMA_Crossover           0.0%       0.0%        0.00      0.0%       0    ✗ FAIL
+Regime_RiskOnOff           3.7%      37.1%        1.29      6.4%      70    ✗ FAIL
+PriceMomentum_25           6.6%      50.0%        3.32      1.9%      10    ✗ FAIL
+Residual_MeanRev           1.5%      38.8%        1.16      5.4%     116    ✗ FAIL
+Donchian_Breakout         -3.5%      21.4%        0.58      8.3%      14    ✗ FAIL
+Blended_MomentumMR        -1.1%      32.0%        0.91      4.6%      25    ✗ FAIL
+BTC_MomentumBreakout       1.6%     100.0%  3177697028.15      0.0%       1    ✗ FAIL
+================================================================================
+
+Thresholds: CAGR≥30%  WinRate≥38%  ProfFactor≥1.2
+
+2026-09-29 01:39:05,383 [WARNING ] WebSocket connection lost: [Errno 104] Connection reset by peer
+2026-09-29 01:39:05,541 [INFO    ] Equity curve chart saved to: backtest_results.html
+
+Open 'backtest_results.html' in your browser to view the equity curves.
+
