@@ -27,18 +27,38 @@ class Signal:
         return self.type != SignalType.HOLD
 
 
+@dataclass(frozen=True)
+class ParamSpec:
+    """Hard limits and adjustment step for one tunable strategy parameter."""
+    min: float
+    max: float
+    step: float
+
+    def clamp(self, value):
+        v = min(max(value, self.min), self.max)
+        if all(float(x).is_integer() for x in (self.min, self.max, self.step)):
+            return int(round(v))
+        return round(float(v), 6)
+
+
 class BaseStrategy(ABC):
     """
     All concrete strategies inherit from this class.
     Each strategy must implement `generate_signal` and declare
     its required indicator lookback via `min_candles`.
+
+    TUNABLE_PARAMS declares the only params the learning engine may change,
+    with hard min / max limits and the size of one adjustment step.
     """
+
+    TUNABLE_PARAMS: Dict[str, ParamSpec] = {}
 
     def __init__(self, name: str, params: Dict[str, Any]):
         self.name = name
         self.params = dict(params)
         self.capital: float = 0.0
         self.is_active: bool = False
+        self.frozen: bool = False   # frozen = baseline copy, params never change
 
         # Running counters – updated by PortfolioManager
         self.total_trades: int = 0
@@ -76,7 +96,39 @@ class BaseStrategy(ABC):
     # ─── Convenience helpers ──────────────────────────────────────────────────
 
     def update_params(self, new_params: Dict[str, Any]):
+        if self.frozen:
+            raise RuntimeError(f"{self.name} is frozen (baseline); params cannot change")
         self.params.update(new_params)
+
+    # ─── Tunable params (learning engine) ─────────────────────────────────────
+
+    def freeze(self):
+        self.frozen = True
+
+    def set_tunable_param(self, name: str, value):
+        """Set a declared tunable param, clamped to its hard limits. Returns the value set."""
+        if self.frozen:
+            raise RuntimeError(f"{self.name} is frozen (baseline); params cannot change")
+        spec = self.TUNABLE_PARAMS[name]   # KeyError if not declared
+        self.params[name] = spec.clamp(value)
+        return self.params[name]
+
+    def tunable_values(self) -> Dict[str, Any]:
+        return {k: self.params[k] for k in self.TUNABLE_PARAMS}
+
+    def restore_tunables(self, saved: Dict[str, Any]):
+        """Re-apply persisted learned values; undeclared keys are ignored."""
+        for name, value in (saved or {}).items():
+            if name in self.TUNABLE_PARAMS:
+                self.set_tunable_param(name, value)
+
+    def clone(self, params: Optional[Dict[str, Any]] = None) -> "BaseStrategy":
+        """Fresh instance of the same strategy with these params (never frozen)."""
+        other = type(self)()
+        other.params = dict(self.params)
+        if params:
+            other.params.update(params)
+        return other
 
     def set_capital(self, capital: float):
         self.capital = capital

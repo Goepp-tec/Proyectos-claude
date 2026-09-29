@@ -20,10 +20,18 @@ Using the PREVIOUS candle's Donchian levels avoids look-ahead bias.
 import pandas as pd
 
 import config
-from .base_strategy import BaseStrategy, Signal, SignalType
+from .base_strategy import BaseStrategy, ParamSpec, Signal, SignalType
 
 
 class DonchianBreakoutStrategy(BaseStrategy):
+
+    # Learning engine may only adjust these, within [min, max], one step at a time.
+    TUNABLE_PARAMS = {
+        "dc_period": ParamSpec(min=10, max=30, step=1),
+        "adx_calm_max": ParamSpec(min=15, max=35, step=1),
+        "atr_sl_mult": ParamSpec(min=1.0, max=3.0, step=0.25),
+        "atr_tp_mult": ParamSpec(min=2.0, max=6.0, step=0.5),
+    }
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS.get("Donchian_Breakout", {
@@ -33,6 +41,7 @@ class DonchianBreakoutStrategy(BaseStrategy):
             "atr_tp_mult":     3.5,
             "candle_interval": "1d",
         })
+        defaults = dict(defaults)   # never mutate the shared config.STRATEGY_PARAMS
         if params:
             defaults.update(params)
         super().__init__("Donchian_Breakout", defaults)

@@ -16,10 +16,17 @@ Requires BACKTEST_DAYS >= 300 to warm up SMA-250 properly.
 import pandas as pd
 
 import config
-from .base_strategy import BaseStrategy, Signal, SignalType
+from .base_strategy import BaseStrategy, ParamSpec, Signal, SignalType
 
 
 class DualMACrossoverStrategy(BaseStrategy):
+
+    # Learning engine may only adjust these, within [min, max], one step at a time.
+    TUNABLE_PARAMS = {
+        "fast_period": ParamSpec(min=50, max=150, step=10),
+        "atr_sl_mult": ParamSpec(min=1.0, max=3.0, step=0.25),
+        "atr_tp_mult": ParamSpec(min=2.0, max=7.0, step=0.5),
+    }
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS.get("DualMA_Crossover", {
@@ -29,6 +36,7 @@ class DualMACrossoverStrategy(BaseStrategy):
             "atr_tp_mult":     5.0,
             "candle_interval": "1d",
         })
+        defaults = dict(defaults)   # never mutate the shared config.STRATEGY_PARAMS
         if params:
             defaults.update(params)
         super().__init__("DualMA_Crossover", defaults)

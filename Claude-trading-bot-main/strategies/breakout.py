@@ -19,6 +19,7 @@ class BreakoutStrategy(BaseStrategy):
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS["Breakout"].copy()
+        defaults = dict(defaults)   # never mutate the shared config.STRATEGY_PARAMS
         if params:
             defaults.update(params)
         super().__init__("Breakout", defaults)

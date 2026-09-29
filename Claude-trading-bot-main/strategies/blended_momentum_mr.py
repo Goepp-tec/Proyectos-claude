@@ -28,10 +28,18 @@ momentum carries it; during choppy / mean-reverting markets RSI+BB carries it.
 import pandas as pd
 
 import config
-from .base_strategy import BaseStrategy, Signal, SignalType
+from .base_strategy import BaseStrategy, ParamSpec, Signal, SignalType
 
 
 class BlendedMomentumMRStrategy(BaseStrategy):
+
+    # Learning engine may only adjust these, within [min, max], one step at a time.
+    TUNABLE_PARAMS = {
+        "rsi_oversold": ParamSpec(min=25, max=45, step=1),
+        "rsi_overbought": ParamSpec(min=55, max=75, step=1),
+        "atr_sl_mult": ParamSpec(min=1.0, max=3.0, step=0.25),
+        "atr_tp_mult": ParamSpec(min=2.0, max=6.0, step=0.5),
+    }
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS.get("Blended_MomentumMR", {
@@ -44,6 +52,7 @@ class BlendedMomentumMRStrategy(BaseStrategy):
             "atr_tp_mult":      3.8,
             "candle_interval":  "4h",
         })
+        defaults = dict(defaults)   # never mutate the shared config.STRATEGY_PARAMS
         if params:
             defaults.update(params)
         super().__init__("Blended_MomentumMR", defaults)

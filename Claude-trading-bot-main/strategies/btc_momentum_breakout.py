@@ -33,10 +33,17 @@ Notes:
 import pandas as pd
 
 import config
-from .base_strategy import BaseStrategy, Signal, SignalType
+from .base_strategy import BaseStrategy, ParamSpec, Signal, SignalType
 
 
 class BTCMomentumBreakoutStrategy(BaseStrategy):
+
+    # Learning engine may only adjust these, within [min, max], one step at a time.
+    TUNABLE_PARAMS = {
+        "breakout_lookback": ParamSpec(min=10, max=40, step=1),
+        "volume_mult": ParamSpec(min=1.0, max=2.0, step=0.1),
+        "atr_tp_mult": ParamSpec(min=2.0, max=5.0, step=0.5),
+    }
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS.get("BTC_MomentumBreakout", {
@@ -54,6 +61,7 @@ class BTCMomentumBreakoutStrategy(BaseStrategy):
             "atr_sl_mult":       1.5,   # supplementary ATR-based SL (tighter than hard stop)
             "candle_interval":  "1d",
         })
+        defaults = dict(defaults)   # never mutate the shared config.STRATEGY_PARAMS
         if params:
             defaults.update(params)
         super().__init__("BTC_MomentumBreakout", defaults)

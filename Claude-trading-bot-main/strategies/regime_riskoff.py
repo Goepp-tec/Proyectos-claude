@@ -25,10 +25,18 @@ All three must agree before a regime change is declared, reducing false flips.
 import pandas as pd
 
 import config
-from .base_strategy import BaseStrategy, Signal, SignalType
+from .base_strategy import BaseStrategy, ParamSpec, Signal, SignalType
 
 
 class RegimeRiskOffStrategy(BaseStrategy):
+
+    # Learning engine may only adjust these, within [min, max], one step at a time.
+    TUNABLE_PARAMS = {
+        "rsi_bull_min": ParamSpec(min=45, max=60, step=1),
+        "rsi_bear_max": ParamSpec(min=40, max=55, step=1),
+        "atr_sl_mult": ParamSpec(min=1.0, max=3.0, step=0.25),
+        "atr_tp_mult": ParamSpec(min=2.0, max=7.0, step=0.5),
+    }
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS.get("Regime_RiskOnOff", {
@@ -39,6 +47,7 @@ class RegimeRiskOffStrategy(BaseStrategy):
             "atr_tp_mult":     4.5,
             "candle_interval": "4h",
         })
+        defaults = dict(defaults)   # never mutate the shared config.STRATEGY_PARAMS
         if params:
             defaults.update(params)
         super().__init__("Regime_RiskOnOff", defaults)

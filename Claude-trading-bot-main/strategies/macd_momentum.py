@@ -19,6 +19,7 @@ class MACDMomentumStrategy(BaseStrategy):
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS["MACD_Momentum"].copy()
+        defaults = dict(defaults)   # never mutate the shared config.STRATEGY_PARAMS
         if params:
             defaults.update(params)
         super().__init__("MACD_Momentum", defaults)
