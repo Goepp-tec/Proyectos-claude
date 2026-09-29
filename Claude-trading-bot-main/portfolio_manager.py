@@ -146,70 +146,84 @@ class PortfolioManager:
                     return False
                 db.set_meta(key, candle_ts)
 
-            # ── Risk checks ───────────────────────────────────────────────────
-            if not self._risk_check(strat_name, signal, ml_confidence, current_price):
-                return False
+            placed, reason = self._open_from_signal(strategy, signal, current_price, ml_confidence)
+            if candle_ts is not None:
+                db.record_signal(
+                    book=self.book, strategy_name=strat_name, candle_ts=candle_ts,
+                    signal_type=signal.type.value, confidence=signal.confidence,
+                    ml_confidence=ml_confidence, price=current_price,
+                    acted=placed, reason=reason, recorded_at=self._clock(),
+                )
+            return placed
 
-            open_positions = db.get_open_positions(strat_name, book=self.book)
-            if len(open_positions) >= config.MAX_OPEN_POSITIONS_PER_STRATEGY:
-                logger.debug(f"{strat_name}: max open positions reached")
-                return False
+    def _open_from_signal(self, strategy: BaseStrategy, signal: Signal,
+                          current_price: float, ml_confidence: float) -> tuple:
+        """Returns (placed: bool, reason: str). Caller holds self._lock."""
+        strat_name = strategy.name
+        # ── Risk checks ───────────────────────────────────────────────────
+        if not self._risk_check(strat_name, signal, ml_confidence, current_price):
+            return False, "risk_check"
 
-            capital = self._capital.get(strat_name, 0.0)
-            if capital < 50:
-                logger.warning(f"{strat_name}: insufficient capital (${capital:.2f})")
-                return False
+        open_positions = db.get_open_positions(strat_name, book=self.book)
+        if len(open_positions) >= config.MAX_OPEN_POSITIONS_PER_STRATEGY:
+            logger.debug(f"{strat_name}: max open positions reached")
+            return False, "max_open_positions"
 
-            # ── Position sizing ───────────────────────────────────────────────
-            quantity, notional = self._size_position(
-                capital, current_price, signal, ml_confidence
-            )
-            if quantity <= 0:
-                return False
+        capital = self._capital.get(strat_name, 0.0)
+        if capital < 50:
+            logger.warning(f"{strat_name}: insufficient capital (${capital:.2f})")
+            return False, "insufficient_capital"
 
-            # ── Place order ───────────────────────────────────────────────────
-            side = "BUY" if signal.type == SignalType.BUY else "SELL"
-            order = self._place_order(side, quantity, current_price)
-            if order is None:
-                logger.error(f"{strat_name}: order placement failed")
-                return False
+        # ── Position sizing ───────────────────────────────────────────────
+        quantity, notional = self._size_position(
+            capital, current_price, signal, ml_confidence
+        )
+        if quantity <= 0:
+            return False, "zero_size"
 
-            # Actual fill price (slippage included in demo mode)
-            fill_price = self._get_fill_price(order, current_price)
+        # ── Place order ───────────────────────────────────────────────────
+        side = "BUY" if signal.type == SignalType.BUY else "SELL"
+        order = self._place_order(side, quantity, current_price)
+        if order is None:
+            logger.error(f"{strat_name}: order placement failed")
+            return False, "order_failed"
 
-            sl  = signal.stop_loss  or fill_price * (
-                (1 - config.DEFAULT_STOP_LOSS_PCT) if side == "BUY"
-                else (1 + config.DEFAULT_STOP_LOSS_PCT)
-            )
-            tp  = signal.take_profit or fill_price * (
-                (1 + config.DEFAULT_TAKE_PROFIT_PCT) if side == "BUY"
-                else (1 - config.DEFAULT_TAKE_PROFIT_PCT)
-            )
+        # Actual fill price (slippage included in demo mode)
+        fill_price = self._get_fill_price(order, current_price)
 
-            pos_id = db.open_position(
-                strategy_name=strat_name,
-                symbol=config.SYMBOL,
-                side="LONG" if side == "BUY" else "SHORT",
-                entry_price=fill_price,
-                quantity=quantity,
-                stop_loss=sl,
-                take_profit=tp,
-                order_id=str(order.get("orderId", "")),
-                ml_confidence=ml_confidence,
-                metadata=signal.metadata or {},
-                book=self.book,
-                entry_time=self._clock(),
-            )
+        sl  = signal.stop_loss  or fill_price * (
+            (1 - config.DEFAULT_STOP_LOSS_PCT) if side == "BUY"
+            else (1 + config.DEFAULT_STOP_LOSS_PCT)
+        )
+        tp  = signal.take_profit or fill_price * (
+            (1 + config.DEFAULT_TAKE_PROFIT_PCT) if side == "BUY"
+            else (1 - config.DEFAULT_TAKE_PROFIT_PCT)
+        )
 
-            # Deduct reserved capital (notional value)
-            self._capital[strat_name] -= notional
-            self._sync_capital_row(strat_name, self._capital[strat_name])
+        pos_id = db.open_position(
+            strategy_name=strat_name,
+            symbol=config.SYMBOL,
+            side="LONG" if side == "BUY" else "SHORT",
+            entry_price=fill_price,
+            quantity=quantity,
+            stop_loss=sl,
+            take_profit=tp,
+            order_id=str(order.get("orderId", "")),
+            ml_confidence=ml_confidence,
+            metadata=signal.metadata or {},
+            book=self.book,
+            entry_time=self._clock(),
+        )
 
-            logger.info(
-                f"[{self.book}:{strat_name}] OPEN {side} {quantity:.5f} BTC @ ${fill_price:,.2f} "
-                f"| SL=${sl:,.2f} TP=${tp:,.2f} | notional=${notional:,.2f}"
-            )
-            return True
+        # Deduct reserved capital (notional value)
+        self._capital[strat_name] -= notional
+        self._sync_capital_row(strat_name, self._capital[strat_name])
+
+        logger.info(
+            f"[{self.book}:{strat_name}] OPEN {side} {quantity:.5f} BTC @ ${fill_price:,.2f} "
+            f"| SL=${sl:,.2f} TP=${tp:,.2f} | notional=${notional:,.2f}"
+        )
+        return True, "opened"
 
     # ─── Position monitoring ──────────────────────────────────────────────────
 

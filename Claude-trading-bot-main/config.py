@@ -19,6 +19,12 @@ TESTNET_WS_URL   = "wss://testnet.binance.vision/ws"
 # PAPER_TRADING=false → live/testnet order execution (requires API keys)
 PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() == "true"
 
+# If NO strategy passes the startup backtest the bot runs in OBSERVATION mode:
+# it logs signals and tracks theoretical equity in a separate 'observe' book but
+# opens no positions and places no orders. Set to "true" to trade all
+# (unvalidated) strategies anyway — the original behaviour of this bot.
+ALLOW_UNVALIDATED_STRATEGIES = os.getenv("ALLOW_UNVALIDATED_STRATEGIES", "false").lower() == "true"
+
 # ─── Trading Parameters ────────────────────────────────────────────────────────
 SYMBOL             = "BTCUSDT"
 INITIAL_CAPITAL    = float(os.getenv("INITIAL_CAPITAL", "10000"))

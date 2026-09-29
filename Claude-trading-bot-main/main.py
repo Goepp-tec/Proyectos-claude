@@ -77,6 +77,31 @@ root_logger.handlers = [console_handler, file_handler]
 
 logger = logging.getLogger("main")
 
+# ─── Trading mode ─────────────────────────────────────────────────────────────
+
+def select_trading_mode(strategies, bt_results, allow_unvalidated: bool):
+    """
+    Returns (active_strategies, book, mode):
+      TRADE             – only strategies that passed the backtest, book 'main'
+      TRADE_UNVALIDATED – none passed but ALLOW_UNVALIDATED_STRATEGIES: all, 'main'
+      OBSERVE           – none passed: all strategies run in the 'observe' book
+                          (signals + theoretical equity, no positions/orders)
+    """
+    passing = [s for s in strategies
+               if bt_results.get(s.name) is not None and bt_results[s.name].passes_threshold]
+    if passing:
+        return passing, "main", "TRADE"
+    if allow_unvalidated:
+        return list(strategies), "main", "TRADE_UNVALIDATED"
+    return list(strategies), "observe", "OBSERVE"
+
+
+def make_portfolio(client, strategies, book: str, clock=None) -> PortfolioManager:
+    """Only the 'main' book sends orders through the client (paper or live)."""
+    return PortfolioManager(client, strategies, book=book,
+                            simulate_fills=(book != "main"), clock=clock)
+
+
 # ─── Shutdown flag ────────────────────────────────────────────────────────────
 _shutdown = threading.Event()
 
@@ -97,6 +122,8 @@ class TradingBot:
         self.strategies = [S() for S in ALL_STRATEGIES]
         self.portfolio:  PortfolioManager = None
         self.learning:   LearningEngine   = None
+        self.book = "main"      # book the (learning) strategies trade in
+        self.mode = "TRADE"
         self._strat_dfs: Dict[str, object] = {}
         self._logged_candle: Dict[str, str] = {}
         self._current_price: float = 0.0
@@ -130,43 +157,34 @@ class TradingBot:
         logger.info(f"\nRunning backtests on {config.BACKTEST_DAYS} days of real Binance data…")
         bt_results = run_all_backtests(self.strategies, self.client)
 
-        # Activate strategies that pass thresholds
-        active_count = 0
         for strat in self.strategies:
             result = bt_results.get(strat.name)
-            passes = False
-            reason = "no backtest result"
-
             if result:
-                passes = result.passes_threshold   # CAGR ≥ threshold AND WR ≥ min AND PF ≥ min
-                reason = (
-                    f"CAGR={result.cagr*100:.1f}% "
-                    f"WR={result.win_rate*100:.1f}% "
-                    f"PF={result.pf_display} "
+                symbol, level = ("✓", "info") if result.passes_threshold else ("✗", "warning")
+                getattr(logger, level)(
+                    f"  {symbol} {strat.name:20s}  CAGR={result.cagr*100:.1f}% "
+                    f"WR={result.win_rate*100:.1f}% PF={result.pf_display} "
                     f"trades={result.total_trades}"
                 )
-
-            share = config.INITIAL_CAPITAL / max(
-                len([r for r in bt_results.values() if r and r.passes_threshold]), 1
-            )
-
-            if passes:
-                strat.is_active = True
-                active_count += 1
-                symbol = "✓"
-                level = "info"
             else:
-                strat.is_active = False
-                share = 0
-                symbol = "✗"
-                level = "warning"
+                logger.warning(f"  ✗ {strat.name:20s}  no backtest result")
 
-            getattr(logger, level)(f"  {symbol} {strat.name:20s}  {reason}")
+        # Decide what trades: validated strategies, all (only if explicitly
+        # allowed) or nothing — observation mode.
+        active, self.book, self.mode = select_trading_mode(
+            self.strategies, bt_results, config.ALLOW_UNVALIDATED_STRATEGIES
+        )
+        active_names = {s.name for s in active}
+        trades_main = self.book == "main"
+        share = config.INITIAL_CAPITAL / max(len(active), 1)
+        for strat in self.strategies:
+            strat.is_active = strat.name in active_names
+            result = bt_results.get(strat.name)
+            in_main = trades_main and strat.is_active
             # Preserve existing capital on restart to avoid double-counting with
             # any open positions whose notional was already deducted in a prior run.
-            # Only assign a fresh share when the strategy has no capital yet (first boot).
             existing_row = db.get_strategy(strat.name)
-            if passes:
+            if in_main:
                 new_capital = existing_row["capital"] if (existing_row and existing_row["capital"] > 0) else share
             else:
                 new_capital = 0
@@ -176,33 +194,26 @@ class TradingBot:
                 params=strat.params,
                 backtest_cagr=result.cagr if result else 0,
                 backtest_win_rate=result.win_rate if result else 0,
-                is_active=passes,
+                is_active=in_main,
             )
+        db.set_meta("trading_mode", self.mode)
 
-        # If nothing passes, activate everything with reduced size
-        if active_count == 0:
+        if self.mode == "OBSERVE":
             logger.warning(
-                "No strategy passed backtest thresholds. "
-                "Activating ALL with reduced position sizing."
+                "No strategy passed backtest thresholds → OBSERVATION MODE: signals and "
+                "theoretical equity are recorded in the 'observe' book, no positions are "
+                "opened. Set ALLOW_UNVALIDATED_STRATEGIES=true to trade them anyway."
             )
-            share = config.INITIAL_CAPITAL / len(self.strategies)
-            for strat in self.strategies:
-                strat.is_active = True
-                result = bt_results.get(strat.name)
-                existing_row = db.get_strategy(strat.name)
-                new_capital = existing_row["capital"] if (existing_row and existing_row["capital"] > 0) else share
-                db.upsert_strategy(
-                    name=strat.name, capital=new_capital, params=strat.params,
-                    backtest_cagr=result.cagr if result else 0,
-                    backtest_win_rate=result.win_rate if result else 0,
-                    is_active=True,
-                )
-            active_count = len(self.strategies)
-
-        logger.info(f"\n{active_count}/{len(self.strategies)} strategies active\n")
+        elif self.mode == "TRADE_UNVALIDATED":
+            logger.warning(
+                "No strategy passed backtest thresholds, but ALLOW_UNVALIDATED_STRATEGIES=true "
+                "→ trading ALL strategies (unvalidated)."
+            )
+        logger.info(f"\nMode {self.mode}: {len(active)}/{len(self.strategies)} strategies "
+                    f"in book '{self.book}'\n")
 
         # Init portfolio + learning
-        self.portfolio = PortfolioManager(self.client, self.strategies)
+        self.portfolio = make_portfolio(self.client, self.strategies, self.book)
         strat_dict = {s.name: s for s in self.strategies}
         self.learning = LearningEngine(strat_dict)
 
@@ -216,6 +227,7 @@ class TradingBot:
             realized_pnl=bal["realized_pnl"],
             unrealized_pnl=bal["unrealized_pnl"],
             strategy_breakdown=bal.get("breakdown", {}),
+            book=self.book,
         )
 
         logger.info("Startup complete. Entering trading loops.\n")
@@ -311,7 +323,7 @@ class TradingBot:
         _last_trade_count = 0
         while not _shutdown.is_set():
             try:
-                all_trades = db.get_trades(limit=1000)
+                all_trades = db.get_trades(limit=1000, book=self.book)
                 current_count = len(all_trades)
 
                 if current_count > _last_trade_count:
@@ -355,9 +367,10 @@ class TradingBot:
                         realized_pnl=bal["realized_pnl"],
                         unrealized_pnl=bal["unrealized_pnl"],
                         strategy_breakdown=bal.get("breakdown", {}),
+                        book=self.book,
                     )
                     logger.info(
-                        f"[balance] ${bal['total_balance']:,.2f} | "
+                        f"[balance:{self.book}] ${bal['total_balance']:,.2f} | "
                         f"Realized: ${bal['realized_pnl']:+,.2f} | "
                         f"Unrealized: ${bal['unrealized_pnl']:+,.2f}"
                     )

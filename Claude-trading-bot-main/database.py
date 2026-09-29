@@ -142,6 +142,23 @@ def init_db():
         conn.execute("ALTER TABLE trades ADD COLUMN is_backtest INTEGER DEFAULT 0")
         conn.commit()
 
+    # One row per strategy signal per closed candle (acted on or not, and why).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS signal_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            book            TEXT NOT NULL,
+            strategy_name   TEXT NOT NULL,
+            candle_ts       TEXT NOT NULL,
+            signal_type     TEXT NOT NULL,
+            confidence      REAL,
+            ml_confidence   REAL,
+            price           REAL,
+            acted           INTEGER NOT NULL,
+            reason          TEXT,
+            recorded_at     TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
     # Paper "books": 'main' (what the bot trades), 'observe' (observation-mode
     # theoretical trades), 'baseline' (frozen-parameter shadow copies).
     for table in ("positions", "trades", "balance_history"):
@@ -226,6 +243,28 @@ def set_meta(key: str, value: str):
         VALUES (?, ?, datetime('now'))
     """, (key, value))
     conn.commit()
+
+
+def record_signal(book: str, strategy_name: str, candle_ts: str, signal_type: str,
+                  confidence: float, ml_confidence: float, price: float,
+                  acted: bool, reason: str, recorded_at: str = None):
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO signal_log (book, strategy_name, candle_ts, signal_type, confidence,
+                                ml_confidence, price, acted, reason, recorded_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+    """, (book, strategy_name, candle_ts, signal_type, confidence, ml_confidence,
+          price, int(acted), reason, recorded_at))
+    conn.commit()
+
+
+def get_signals(book: Optional[str] = None, limit: int = 200) -> List[Dict]:
+    extra, params = _book_filter(book, ())
+    rows = get_conn().execute(
+        f"SELECT * FROM signal_log WHERE 1=1{extra} ORDER BY id DESC LIMIT ?",
+        params + (limit,)
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def upsert_strategy(name: str, capital: float, params: dict,
