@@ -113,8 +113,10 @@ class BinanceWebSocketClient:
     """
     
     WS_BASE = "wss://stream.binance.com:9443/ws"
-    RECONNECT_DELAY = 5  # seconds
-    
+    RECONNECT_DELAY = 5             # first retry delay (seconds), doubled per failure
+    MAX_RECONNECT_DELAY = 300       # backoff cap
+    MAX_FAILURES_BEFORE_REST = 8    # never connected after N tries -> REST only
+
     def __init__(self, symbols: List[str] = None):
         self._symbols = symbols or ["btcusdt"]
         self._price_callbacks: List[Callable[[str, float], None]] = []
@@ -122,7 +124,10 @@ class BinanceWebSocketClient:
         self._thread = None
         self._current_prices: Dict[str, float] = {}
         self._lock = threading.Lock()
-        
+        self._stop_event = threading.Event()
+        self._ever_connected = False
+        self.rest_only = False      # True once the WS is given up (persistently blocked)
+
         if not WEBSOCKET_AVAILABLE:
             logger.warning("WebSockets not available - using REST polling")
     
@@ -132,13 +137,15 @@ class BinanceWebSocketClient:
             return
         
         self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="websocket")
         self._thread.start()
         logger.info("WebSocket client started")
-    
+
     def stop(self):
         """Stop the WebSocket connection."""
         self._running = False
+        self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=5)
         logger.info("WebSocket client stopped")
@@ -153,41 +160,64 @@ class BinanceWebSocketClient:
             return self._current_prices.get(symbol.lower())
     
     def _run(self):
-        """Main WebSocket loop."""
+        """
+        Main WebSocket loop with capped exponential backoff (5, 10, 20 ... 300 s)
+        and one log line per attempt. If the stream never connects after
+        MAX_FAILURES_BEFORE_REST attempts (e.g. region-blocked), give up and
+        rely on REST polling only — prices for trading already come from REST.
+        """
+        streams = "/".join([f"{s}@ticker" for s in self._symbols])
+        ws_url = f"{self.WS_BASE}/{streams}"
+        failures = 0
         while self._running:
             try:
-                streams = "/".join([f"{s}@ticker" for s in self._symbols])
-                ws_url = f"{self.WS_BASE}/{streams}"
-                
-                import asyncio
-                asyncio.run(self._connect(ws_url))
-                
+                self._connect_once(ws_url)      # returns when the connection closes
+                if not self._running:
+                    break
+                failures = 0
+                delay = self.RECONNECT_DELAY
+                logger.warning(f"WebSocket closed; reconnecting in {delay}s")
             except Exception as e:
-                logger.error(f"WebSocket error: {e}")
-                if self._running:
-                    time.sleep(self.RECONNECT_DELAY)
-    
+                failures += 1
+                if not self._ever_connected and failures >= self.MAX_FAILURES_BEFORE_REST:
+                    logger.warning(
+                        f"WebSocket unreachable after {failures} attempts ({e}) — "
+                        f"disabled, continuing with REST polling only"
+                    )
+                    self.rest_only = True
+                    self._running = False
+                    break
+                delay = min(self.RECONNECT_DELAY * 2 ** (failures - 1), self.MAX_RECONNECT_DELAY)
+                logger.warning(f"WebSocket attempt {failures} failed ({e}); retrying in {delay}s")
+            if self._running:
+                self._wait(delay)
+
+    def _wait(self, seconds: float):
+        self._stop_event.wait(seconds)
+
+    def _connect_once(self, ws_url: str):
+        """One connection attempt; raises on failure."""
+        import asyncio
+        asyncio.run(self._connect(ws_url))
+
     async def _connect(self, ws_url: str):
-        """Connect to WebSocket and process messages."""
+        """Connect to WebSocket and process messages (exceptions propagate)."""
         if not WEBSOCKET_AVAILABLE:
             return
-            
-        try:
-            async with websockets.connect(ws_url) as ws:
-                logger.info(f"WebSocket connected to {ws_url}")
-                
-                async for message in ws:
-                    if not self._running:
-                        break
-                    
-                    try:
-                        data = json.loads(message)
-                        self._process_ticker(data)
-                    except Exception as e:
-                        logger.debug(f"WebSocket message error: {e}")
-                        
-        except Exception as e:
-            logger.warning(f"WebSocket connection lost: {e}")
+
+        async with websockets.connect(ws_url) as ws:
+            self._ever_connected = True
+            logger.info(f"WebSocket connected to {ws_url}")
+
+            async for message in ws:
+                if not self._running:
+                    break
+
+                try:
+                    data = json.loads(message)
+                    self._process_ticker(data)
+                except Exception as e:
+                    logger.debug(f"WebSocket message error: {e}")
     
     def _process_ticker(self, data: dict):
         """Process a ticker update message."""
