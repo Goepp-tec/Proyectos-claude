@@ -78,3 +78,6 @@ def test_replay_runs_both_books_offline_and_keeps_baseline_frozen(tmp_path, monk
     from run_replay_test import build_report
     report = build_report(res, "sintetico")
     assert "LAB" in report and "CALIFICACION FINAL" in report
+    # different capital bases (budget vs funds): the verdict compares returns, not dollars
+    verdict = next(l for l in report.splitlines() if l.startswith("Aprende vs baseline"))
+    assert "USD" not in verdict and "pts" in verdict

@@ -303,9 +303,13 @@ def build_report(res: dict, data_source: str) -> str:
     for label, fmt, key in rows:
         w(f"{label:<34}{fmt.format(L[key]):>15}{fmt.format(T[key]):>15}{fmt.format(B[key]):>15}")
     w("")
-    diff = L["equity_end"] - B["equity_end"]
-    better = diff > 0 and L["max_drawdown"] <= B["max_drawdown"] + 0.02
-    w(f"Aprende vs baseline: equity {diff:+,.2f} USD -> {'SUPERO' if better else 'NO supero'} al baseline.")
+    # Aprende trades the budget, baseline / lab the funds: compare returns, not dollars.
+    for name, other in (("baseline", B), ("lab", T)):
+        diff = L["total_return"] - other["total_return"]
+        better = diff > 0 and L["max_drawdown"] <= other["max_drawdown"] + 0.02
+        w(f"Aprende vs {name}: retorno {L['total_return']:+.2%} vs {other['total_return']:+.2%} "
+          f"({diff * 100:+.2f} pts), max drawdown {L['max_drawdown']:.1%} vs {other['max_drawdown']:.1%} "
+          f"-> {'SUPERO' if better else 'NO supero'}.")
     if B["trades"] and L["trades"] < 0.5 * B["trades"]:
         w(f"  OJO: hizo {L['trades']} trades vs {B['trades']} del baseline; buena parte de la")
         w("  diferencia viene de operar menos (el filtro evita estrategias no viables).")
