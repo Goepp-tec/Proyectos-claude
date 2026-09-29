@@ -131,6 +131,7 @@ app.layout = dbc.Container(fluid=True, style={"backgroundColor": COLORS["bg"],
         dbc.Tab(label="Trade Journal",         tab_id="tab-journal"),
         dbc.Tab(label="Aprendizaje",           tab_id="tab-learning"),
         dbc.Tab(label="Estrategias",           tab_id="tab-evaluation"),
+        dbc.Tab(label="Mercado",               tab_id="tab-market"),
         dbc.Tab(label="Control",               tab_id="tab-control"),
     ]),
 
@@ -263,6 +264,8 @@ def render_tab_for(active_tab, trigger):
         return _render_learning()
     elif active_tab == "tab-evaluation":
         return _render_strategy_evaluation()
+    elif active_tab == "tab-market":
+        return _render_market()
     return html.Div("Select a tab")
 
 
@@ -885,6 +888,89 @@ def _render_strategy_evaluation():
         dcc.Graph(figure=fig_regime, config={"displayModeBar": False}),
         html.H6("Detalle por estrategia", style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
         _table(rows, page_size=20, conditional=status_colors),
+    ])
+
+
+# ─── Market: what top traders, the crowd and sentiment are doing ─────────────
+
+def _fng_label(v: float) -> str:
+    if v <= 24:
+        return "Miedo extremo"
+    if v <= 44:
+        return "Miedo"
+    if v <= 55:
+        return "Neutral"
+    if v <= 75:
+        return "Codicia"
+    return "Codicia extrema"
+
+
+def _render_market():
+    from market_data import load_series
+    sym = config.SYMBOL
+    s = {m: load_series(sym, m) for m in ("fng", "funding_rate", "top_pos_ratio", "global_ratio",
+                                          "taker_ratio", "oi_value")}
+    if all(x.empty for x in s.values()):
+        return html.Div("Todavía no hay datos de mercado: el bot los recoge cada hora "
+                        "(la primera vez tarda unos minutos).",
+                        id="market-panel", style={"color": COLORS["subtext"], "padding": "20px"})
+
+    long_pct = lambda r: r / (1 + r) * 100         # long/short ratio -> % of longs
+    last = lambda x: float(x.iloc[-1]) if len(x) else None
+    cards = []
+    if (v := last(s["fng"])) is not None:
+        cards.append(_metric_card("Miedo y Codicia", f"{v:.0f}", "red" if v <= 24 else "green" if v >= 76 else "yellow",
+                                  subtitle=_fng_label(v)))
+    if (v := last(s["top_pos_ratio"])) is not None:
+        cards.append(_metric_card("Top traders en largo", f"{long_pct(v):.1f}%", "blue",
+                                  subtitle=f"ratio {v:.2f} (por posición)"))
+    if (v := last(s["global_ratio"])) is not None:
+        cards.append(_metric_card("Todas las cuentas en largo", f"{long_pct(v):.1f}%", "purple",
+                                  subtitle=f"ratio {v:.2f} (la masa)"))
+    if (v := last(s["funding_rate"])) is not None:
+        cards.append(_metric_card("Funding (cada 8 h)", f"{v * 100:+.4f}%", "green" if v >= 0 else "red",
+                                  subtitle=f"≈ {v * 3 * 365 * 100:+.1f}% anual; > 0 = los largos pagan"))
+    if (v := last(s["taker_ratio"])) is not None:
+        cards.append(_metric_card("Compradores / vendedores", f"{v:.2f}", "green" if v >= 1 else "red",
+                                  subtitle="volumen agresivo (taker)"))
+    if (v := last(s["oi_value"])) is not None:
+        cards.append(_metric_card("Open interest", f"${v / 1e9:,.2f} B", "text", subtitle="futuros BTCUSDT"))
+
+    figs = []
+    if len(s["top_pos_ratio"]) or len(s["global_ratio"]):
+        fig = go.Figure()
+        for key, name, color in (("top_pos_ratio", "Top traders (posición)", COLORS["blue"]),
+                                 ("global_ratio", "Todas las cuentas", COLORS["purple"])):
+            x = s[key]
+            if len(x):
+                fig.add_trace(go.Scatter(x=x.index, y=long_pct(x), name=name, line=dict(color=color, width=2)))
+        fig.add_hline(y=50, line_dash="dot", line_color=COLORS["border"])
+        fig.update_layout(**_dark_layout("% en largo: top traders vs la masa (Binance Futures)"),
+                          height=300, yaxis_ticksuffix="%")
+        figs.append(fig)
+    if len(s["fng"]):
+        x = s["fng"].iloc[-365:]
+        fig = go.Figure(go.Scatter(x=x.index, y=x, line=dict(color=COLORS["yellow"], width=2), name="F&G"))
+        fig.add_hrect(y0=0, y1=24, fillcolor=COLORS["red"], opacity=0.08, line_width=0)
+        fig.add_hrect(y0=76, y1=100, fillcolor=COLORS["green"], opacity=0.08, line_width=0)
+        fig.update_layout(**_dark_layout("Miedo y Codicia (último año)"), height=260, yaxis_range=[0, 100])
+        figs.append(fig)
+    if len(s["funding_rate"]):
+        x = s["funding_rate"].iloc[-270:]            # ~90 days of 8-hour fundings
+        fig = go.Figure(go.Bar(x=x.index, y=x * 100,
+                               marker_color=[COLORS["green"] if v >= 0 else COLORS["red"] for v in x]))
+        fig.update_layout(**_dark_layout("Funding rate por periodo de 8 h (últimos ~90 días)"), height=240,
+                          yaxis_ticksuffix="%")
+        figs.append(fig)
+
+    return html.Div(id="market-panel", children=[
+        dbc.Alert("Datos públicos y gratuitos: posicionamiento de los top traders y de todas las cuentas "
+                  "de Binance Futures, funding, volumen agresivo y el índice de Miedo y Codicia. Binance "
+                  "solo guarda 30 días de los ratios: la historia se acumula desde que el bot los recoge. "
+                  "Las estrategias modernas usan estos datos y el evaluador decide si sirven.",
+                  color="secondary", style={"fontSize": "13px"}),
+        dbc.Row([dbc.Col(c, md=2) for c in cards], className="g-2 mb-3"),
+        *[dcc.Graph(figure=f, config={"displayModeBar": False}) for f in figs],
     ])
 
 

@@ -6,8 +6,10 @@ import database as db
 
 
 def _dump(component) -> str:
+    """Full JSON of a Dash component, with accents kept (not \\u escapes)."""
+    import json
     from plotly.io.json import to_json_plotly
-    return to_json_plotly(component)
+    return json.dumps(json.loads(to_json_plotly(component)), ensure_ascii=False)
 
 
 def test_kpi_refresh_reuses_one_price_fetcher_and_never_opens_websockets(temp_db):
@@ -99,6 +101,23 @@ def test_control_tab_is_not_rebuilt_by_the_auto_refresh(temp_db):
     from dashboard import app as dash_app
     assert dash_app.render_tab_for("tab-control", "interval-refresh") is dash.no_update
     assert dash_app.render_tab_for("tab-control", "main-tabs") is not dash.no_update
+
+
+def test_market_tab_shows_positioning_funding_and_sentiment(temp_db):
+    from dashboard import app as dash_app
+    from market_data import MarketDataCollector
+    from tests.test_market_data import T0, _fake_http
+    MarketDataCollector("BTCUSDT", http_get=_fake_http(), clock=lambda: T0).update(force=True)
+    out = _dump(dash_app._render_market())
+    for text in ("Miedo y Codicia", "Top traders", "Todas las cuentas", "Funding", "tab-market"[4:]):
+        assert text in out, text
+    assert "20" in out                                          # latest Fear & Greed value
+    assert "tab-market" in _dump(dash_app.app.layout)
+
+
+def test_market_tab_without_data_explains_why(temp_db):
+    from dashboard import app as dash_app
+    assert "todavía no" in _dump(dash_app._render_market()).lower()
 
 
 def test_learning_tab_is_registered():
