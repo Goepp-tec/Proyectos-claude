@@ -1,0 +1,88 @@
+NOTA (agregada despues): este primer replay NO es valido. El libro que aprende
+quedo bloqueado por un bug de confianza ML (confianza 0.0 tras la primera
+perdida, sin recuperacion), corregido en el commit e70ac21. Ver
+REPLAY_REPORT_500d_corregido.txt.
+
+REPLAY HISTORICO ACELERADO â€” APRENDE vs BASELINE
+========================================================================
+Generado        : 2026-09-29 04:36 UTC
+Periodo         : 2025-05-17 04:00 -> 2026-09-29 04:00 UTC (500 dias)
+Datos           : https://api.binance.com (velas reales BTCUSDT 1h/4h/1d)
+Capital inicial : $10,000 por libro, repartido en 8 estrategias
+BTC buy & hold  : -19.75% en el mismo periodo (referencia)
+Duracion calculo: 25.5 min
+
+Metrica                                    APRENDE        BASELINE
+------------------------------------------------------------------
+Retorno total                               -0.31%          -4.22%
+CAGR                                        -0.22%          -3.10%
+Max drawdown                                 1.00%           5.37%
+Profit factor                                 0.76            0.83
+Win rate                                     23.5%           31.0%
+Numero de trades                                17             452
+Sharpe simple (diario, anualiz.)             -0.39           -0.99
+Equity final                             $9,969.46       $9,577.74
+Fees pagadas                                $12.59         $295.83
+
+Diferencia de equity final (aprende - baseline): $+391.72
+CONCLUSION: en este replay el aprendizaje SUPERO al baseline.
+
+EQUITY FINAL POR ESTRATEGIA
+Estrategia                     Aprende      Baseline    Diferencia
+EMA5_Momentum                 1,228.51      1,141.79        +86.72
+DualMA_Crossover              1,304.12      1,304.12         +0.00
+Regime_RiskOnOff              1,243.20      1,085.83       +157.37
+PriceMomentum_25              1,228.80      1,255.96        -27.16
+Residual_MeanRev              1,244.98      1,204.90        +40.07
+Donchian_Breakout             1,235.17      1,170.88        +64.29
+Blended_MomentumMR            1,248.95      1,180.15        +68.80
+BTC_MomentumBreakout          1,235.74      1,234.13         +1.61
+
+APRENDIZAJE: 3956 propuestas -> 22 aplicadas, 3934 rechazadas, 0 revertidas (rollback)
+Motivos de rechazo mas frecuentes:
+   1838 x ningun vecino mejora la ventana de propuesta
+   1227 x validacion: pocos trades
+    869 x validacion: profit factor no mejora lo suficiente
+Cambios aplicados / revertidos (orden cronologico):
+  2025-05-20  applied  Blended_MomentumMR     atr_tp_mult       3.8 -> 3.3   validation PF 0.53->1.31, maxDD 5.6%->2.3%, 15 trades
+  2025-06-17  applied  EMA5_Momentum          atr_sl_mult       1.5 -> 1.25   validation PF 1.12->1.21, maxDD 5.9%->5.0%, 11 trades
+  2025-06-22  applied  EMA5_Momentum          atr_sl_mult       1.25 -> 1   validation PF 0.89->1.05, maxDD 5.2%->4.0%, 12 trades
+  2025-06-22  applied  Regime_RiskOnOff       rsi_bull_min      50 -> 51   validation PF 1.12->1.19, maxDD 5.7%->5.1%, 28 trades
+  2025-07-01  applied  EMA5_Momentum          atr_tp_mult       3.5 -> 4   validation PF 1.06->1.31, maxDD 4.0%->4.0%, 10 trades
+  2025-09-10  applied  EMA5_Momentum          atr_tp_mult       4 -> 4.5   validation PF 1.08->1.19, maxDD 3.8%->3.8%, 10 trades
+  2025-10-06  applied  Donchian_Breakout      atr_sl_mult       1.5 -> 1.25   validation PF 0.97->1.15, maxDD 4.8%->4.1%, 10 trades
+  2025-11-20  applied  EMA5_Momentum          atr_tp_mult       4.5 -> 5   validation PF 1.09->1.20, maxDD 2.3%->2.3%, 11 trades
+  2025-11-21  applied  Residual_MeanRev       atr_tp_mult       3.5 -> 3   validation PF 0.94->1.15, maxDD 5.4%->3.4%, 48 trades
+  2025-11-25  applied  EMA5_Momentum          atr_tp_mult       5 -> 5.5   validation PF 1.36->1.44, maxDD 2.3%->2.3%, 10 trades
+  2026-01-06  applied  Residual_MeanRev       atr_sl_mult       1.8 -> 1.55   validation PF 1.41->1.53, maxDD 2.1%->2.0%, 46 trades
+  2026-03-07  applied  Blended_MomentumMR     rsi_oversold      38 -> 39   validation PF 1.34->2.01, maxDD 2.2%->1.4%, 15 trades
+  2026-04-23  applied  Blended_MomentumMR     rsi_overbought    62 -> 63   validation PF 1.39->1.48, maxDD 2.7%->2.6%, 14 trades
+  2026-06-06  applied  Blended_MomentumMR     atr_tp_mult       3.3 -> 3.8   validation PF 1.44->1.59, maxDD 3.0%->3.0%, 10 trades
+  2026-06-23  applied  Blended_MomentumMR     atr_sl_mult       1.8 -> 1.55   validation PF 1.21->1.41, maxDD 4.2%->3.6%, 12 trades
+  2026-07-28  applied  Regime_RiskOnOff       atr_tp_mult       4.5 -> 5   validation PF 0.96->1.07, maxDD 4.5%->3.8%, 27 trades
+  2026-07-29  applied  Residual_MeanRev       atr_tp_mult       3 -> 2.5   validation PF 1.06->1.18, maxDD 4.0%->3.1%, 50 trades
+  2026-08-02  applied  Regime_RiskOnOff       atr_sl_mult       2 -> 1.75   validation PF 0.89->1.16, maxDD 4.7%->4.5%, 29 trades
+  2026-08-21  applied  Regime_RiskOnOff       atr_tp_mult       5 -> 5.5   validation PF 0.96->1.02, maxDD 5.2%->5.2%, 28 trades
+  2026-08-27  applied  Regime_RiskOnOff       atr_tp_mult       5.5 -> 6   validation PF 0.97->1.05, maxDD 5.2%->5.2%, 26 trades
+  2026-09-05  applied  Residual_MeanRev       atr_tp_mult       2.5 -> 2   validation PF 1.21->1.37, maxDD 3.9%->3.0%, 53 trades
+  2026-09-12  applied  Residual_MeanRev       atr_sl_mult       1.55 -> 1.8   validation PF 1.46->1.54, maxDD 3.0%->2.8%, 51 trades
+Parametros finales (aprende) distintos del baseline:
+  EMA5_Momentum: {'atr_sl_mult': 1.0, 'atr_tp_mult': 5.5}
+  Regime_RiskOnOff: {'rsi_bull_min': 51, 'atr_sl_mult': 1.75, 'atr_tp_mult': 6.0}
+  Residual_MeanRev: {'atr_tp_mult': 2.0}
+  Donchian_Breakout: {'atr_sl_mult': 1.25}
+  Blended_MomentumMR: {'rsi_oversold': 39, 'rsi_overbought': 63, 'atr_sl_mult': 1.55}
+
+ADVERTENCIAS (leer)
+- Es un REPLAY/BACKTEST sobre datos pasados, no evidencia en vivo.
+- Riesgo de sobreajuste: los parametros y umbrales se eligieron mirando datos
+  historicos; un buen resultado aqui no garantiza nada hacia adelante.
+- SL/TP se simulan con un recorrido intra-hora (apertura->min/max->cierre);
+  el orden real dentro de la hora puede diferir. Fills simulados con
+  slippage 0.03% y fee 0.1%; sin spread real ni latencia.
+- Diferencias aprende/baseline vienen de (a) cambios de parametros del tuner y
+  (b) la confianza ML del libro que aprende (win rate reciente, rachas), que
+  ajusta el tamano y puede filtrar entradas; el baseline usa confianza fija 0.55.
+- Profit factor y win rate con pocos trades no son estadisticamente fiables.
+- Indicadores calculados una vez sobre toda la historia (en vivo: sobre la
+  ventana de 600 velas); diferencias minimas en EMAs largas.
