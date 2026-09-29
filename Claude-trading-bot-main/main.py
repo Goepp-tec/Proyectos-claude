@@ -40,6 +40,7 @@ from learning_engine import LearningEngine
 from adaptive_tuner import AdaptiveTuner
 from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES
 from strategy_evaluator import StrategyEvaluator
+from risk_engine import RiskEngine, RiskSettings, profile as risk_profile
 
 # ─── Logging setup ────────────────────────────────────────────────────────────
 # Console handler with colors (if available)
@@ -123,10 +124,12 @@ def resolve_trading_mode(strategies, bt_results, allow_unvalidated: bool, lock: 
     return active, book, mode
 
 
-def make_portfolio(client, strategies, book: str, clock=None) -> PortfolioManager:
+def make_portfolio(client, strategies, book: str, clock=None,
+                   capital_base=None, risk_engine=None) -> PortfolioManager:
     """Only the 'main' book sends orders through the client (paper or live)."""
     return PortfolioManager(client, strategies, book=book,
-                            simulate_fills=(book != "main"), clock=clock)
+                            simulate_fills=(book != "main"), clock=clock,
+                            capital_base=capital_base, risk_engine=risk_engine)
 
 
 def restore_learned_params(learners):
@@ -190,6 +193,7 @@ class TradingBot:
         self.lab = []           # ungated copies of all learners (book 'lab')
         self.lab_portfolio: PortfolioManager = None
         self.evaluator: StrategyEvaluator = None
+        self.risk: RiskEngine = None   # budget / aggressiveness for the learning book
         self._strat_dfs: Dict[str, object] = {}
         self._logged_candle: Dict[str, str] = {}
         self._current_price: float = 0.0
@@ -282,8 +286,19 @@ class TradingBot:
         logger.info(f"\nMode {self.mode}: {len(active)}/{len(self.strategies)} strategies "
                     f"in book '{self.book}'\n")
 
-        # Init portfolio + learning
-        self.portfolio = make_portfolio(self.client, self.strategies, self.book)
+        # Init portfolio + learning. The learning book trades the risk budget,
+        # sized and limited by the risk engine (aggressiveness 1-10).
+        risk_settings = RiskSettings.load()
+        self.risk = RiskEngine(self.book)
+        self.portfolio = make_portfolio(self.client, self.strategies, self.book,
+                                        capital_base=risk_settings.budget, risk_engine=self.risk)
+        prof = risk_profile(risk_settings.aggressiveness)
+        logger.info(
+            f"Risk: funds ${risk_settings.funds:,.0f}, budget ${risk_settings.budget:,.0f}, "
+            f"aggressiveness {prof['level']}/10 (risk/trade {prof['risk_per_trade']:.2%}, "
+            f"daily loss limit {prof['daily_loss']:.1%}, kill switch at {prof['max_drawdown']:.0%} "
+            f"drawdown, ratings allowed: {', '.join(prof['statuses'])}), mode {risk_settings.mode}"
+        )
         strat_dict = {s.name: s for s in self.strategies}
         self.learning = LearningEngine(strat_dict)
 
@@ -384,8 +399,28 @@ class TradingBot:
         """Blocked reason for the learning book, or None if the evaluator allows it."""
         if not config.EVAL_ENABLED or self.evaluator is None:
             return None
-        ok, why = self.evaluator.can_trade(strat, signal.type, df)
+        statuses = risk_profile(RiskSettings.load().aggressiveness)["statuses"]
+        ok, why = self.evaluator.can_trade(strat, signal.type, df, statuses)
         return None if ok else why
+
+    def _risk_housekeeping(self, price: float):
+        """Apply dashboard risk changes and refresh the day / kill-switch state."""
+        if self.risk is None or self.portfolio is None or price <= 0:
+            return
+        settings = RiskSettings.load()
+        if self.portfolio.capital_base != settings.budget:
+            logger.info(f"[risk] budget changed to ${settings.budget:,.2f}")
+            self.portfolio.set_capital_base(settings.budget, price)
+        if self.risk.close_all_requested():
+            n = self.portfolio.close_all_positions(price, reason="MANUAL_CLOSE_ALL")
+            settings.mode = "close_only"
+            settings.save()
+            self.risk.clear_close_all()
+            logger.warning(f"[risk] close-all requested: {n} positions closed, mode -> close_only")
+        st = self.risk.status(self.portfolio, price)
+        if st["kill_switch"] and not getattr(self, "_kill_logged", False):
+            logger.warning(f"[risk] KILL SWITCH: {st['kill_reason']} — no new entries until reset")
+        self._kill_logged = st["kill_switch"]
 
     def _lab_gate(self, strat, signal, df):
         """The lab tests everything except discarded strategies (value 0, never again)."""
@@ -440,6 +475,7 @@ class TradingBot:
                     self.portfolio.check_open_positions(price)
                     self.baseline_portfolio.check_open_positions(price)
                     self.lab_portfolio.check_open_positions(price)
+                    self._risk_housekeeping(price)
             except Exception as e:
                 logger.error(f"[positions] Error: {e}", exc_info=True)
             _shutdown.wait(timeout=config.POSITION_CHECK_INTERVAL_SEC)
