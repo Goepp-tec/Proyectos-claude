@@ -1,0 +1,11 @@
+# 7-day paper-trading test run (Part 5). Use together with docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.7day.yml up -d --build
+# Needs a FRESH ./data folder. Survives container/server restarts (resumes the
+# same schedule). Reports: ./data/reports/REPORTE_7DIAS.txt + daily CSVs.
+services:
+  trading-bot:
+    command: ["python", "scripts/run_7day_test.py"]
+    environment:
+      - TEST_NAME=7d
+      - TEST_DURATION_HOURS=168
+      - TEST_SNAPSHOT_MINUTES=60

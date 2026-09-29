@@ -1,0 +1,112 @@
+"""Part 5: 7-day test runner — survives restarts, hourly snapshots, daily CSV, final report."""
+
+import os
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
+
+import config
+import database as db
+from portfolio_manager import PortfolioManager
+from tests.test_portfolio_risk import _buy, _strategy
+
+T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture
+def run(temp_db, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "INITIAL_CAPITAL", 10_000.0)
+    from scripts.run_7day_test import TestRun
+    return TestRun(name="t", duration_hours=168, snapshot_minutes=60, out_dir=str(tmp_path))
+
+
+def _bot():
+    learners = [_strategy("A"), _strategy("B")]
+    baselines = [_strategy("A"), _strategy("B")]
+    return SimpleNamespace(
+        book="observe", strategies=learners, baselines=baselines, _current_price=50_000.0,
+        portfolio=PortfolioManager(Mock(), learners, book="observe", simulate_fills=True),
+        baseline_portfolio=PortfolioManager(Mock(), baselines, book="baseline", simulate_fills=True),
+    )
+
+
+def test_start_and_resume_keep_the_schedule_and_log_interruptions(run):
+    assert run.start_or_resume(T0) == "started"
+    assert run.end == T0 + timedelta(days=7)
+    run.heartbeat(T0 + timedelta(minutes=10))
+
+    # Container / server restart two hours later
+    from scripts.run_7day_test import TestRun
+    again = TestRun(name="t", duration_hours=168, snapshot_minutes=60, out_dir=run.out_dir)
+    assert again.start_or_resume(T0 + timedelta(hours=2)) == "resumed"
+    assert again.start == T0 and again.end == T0 + timedelta(days=7)
+    gaps = again.interruptions()
+    assert len(gaps) == 1
+    assert gaps[0]["down_from"] == (T0 + timedelta(minutes=10)).isoformat()
+    assert gaps[0]["down_to"] == (T0 + timedelta(hours=2)).isoformat()
+
+
+def test_resume_does_not_reset_equity_or_history(run):
+    bot = _bot()
+    run.start_or_resume(T0)
+    bot.portfolio.process_signal(bot.portfolio.strategies["A"], _buy(50_000.0), 50_000.0, 0.6)
+    from scripts.run_7day_test import TestRun
+    TestRun(name="t", duration_hours=168, snapshot_minutes=60,
+            out_dir=run.out_dir).start_or_resume(T0 + timedelta(hours=1))
+    assert len(db.get_open_positions(book="observe")) == 1
+
+
+def test_hourly_snapshots_per_book_and_strategy(run):
+    bot = _bot()
+    run.start_or_resume(T0)
+    assert run.snapshot_due(T0)
+    run.snapshot(T0, bot)
+    assert not run.snapshot_due(T0 + timedelta(minutes=30))
+    assert run.snapshot_due(T0 + timedelta(minutes=60))
+
+    rows = run.snapshots()
+    names = {(r["book"], r["strategy_name"]) for r in rows}
+    assert names == {("observe", "A"), ("observe", "B"), ("observe", "TOTAL"),
+                     ("baseline", "A"), ("baseline", "B"), ("baseline", "TOTAL")}
+    total = next(r for r in rows if r["book"] == "observe" and r["strategy_name"] == "TOTAL")
+    assert total["equity"] == pytest.approx(10_000.0)
+    assert total["drawdown_pct"] == 0.0
+
+
+def test_daily_csv_export(run):
+    bot = _bot()
+    run.start_or_resume(T0)
+    run.snapshot(T0, bot)
+    assert run.export_daily(T0 + timedelta(hours=3)) == []            # day 1 not over
+    files = run.export_daily(T0 + timedelta(days=1, minutes=1))
+    assert files and all(os.path.exists(f) for f in files)
+    assert run.export_daily(T0 + timedelta(days=1, minutes=5)) == []  # once per day
+
+
+def test_verdict_labels():
+    from scripts.run_7day_test import verdict
+    good = dict(equity_start=10_000, equity_end=10_300, max_drawdown=0.03, trades=25,
+                profit_factor=1.5)
+    base = dict(equity_end=10_100)
+    assert verdict(good, base)[0].startswith("CUMPLE")
+    assert verdict({**good, "trades": 5}, base)[0].startswith("NO CONCLUYENTE")
+    assert verdict({**good, "equity_end": 9_800, "profit_factor": 0.8}, base)[0] == "NO RENTABLE"
+    assert verdict(good, {"equity_end": 10_500})[0].startswith("NO CONCLUYENTE")
+
+
+def test_finish_writes_report_and_is_final(run):
+    bot = _bot()
+    run.start_or_resume(T0)
+    run.snapshot(T0, bot)
+    end = run.end
+    assert not run.is_over(end - timedelta(minutes=1)) and run.is_over(end)
+    path = run.finish(end, bot)
+    text = open(path, encoding="utf-8").read()
+    assert os.path.basename(path) == "REPORTE_7DIAS.txt"
+    for s in ("REPORTE", "Interrupciones", "APRENDE", "BASELINE", "Veredicto"):
+        assert s in text
+    from scripts.run_7day_test import TestRun
+    assert TestRun(name="t", duration_hours=168, snapshot_minutes=60,
+                   out_dir=run.out_dir).start_or_resume(end + timedelta(hours=1)) == "finished"

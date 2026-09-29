@@ -523,7 +523,7 @@ class TradingBot:
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
-def main():
+def prepare_database():
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     if not os.path.exists(env_path):
         example = os.path.join(os.path.dirname(__file__), ".env.example")
@@ -547,6 +547,9 @@ def main():
         if live_since:
             logger.info(f"Live trading since: {live_since}")
 
+
+def main():
+    prepare_database()
     try:
         bot = TradingBot()
         bot.run()
