@@ -410,6 +410,9 @@ def main():
             shutil.copy(example, env_path)
             logger.info("Created .env from .env.example")
 
+    # Schema must exist before bot_metadata is touched (fresh/empty DB file).
+    db.init_db()
+
     # ─── Handle data reset if configured ───────────────────────────────────────
     if config.RESET_ON_STARTUP:
         logger.warning("RESET_ON_STARTUP is enabled - clearing all trading data!")
