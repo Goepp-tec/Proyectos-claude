@@ -16,10 +16,11 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 
 import config
 import database as db
@@ -69,9 +70,29 @@ class LearningEngine:
         self._win_rates: Dict[str, float] = {}
         self._confidence_adjustments: Dict[str, float] = {}  # temporary boosts/penalties
         self._consecutive_losses: Dict[str, int] = {}
+        # (closed_at, pnl_pct) per strategy — drives get_confidence()
+        self._closed: Dict[str, List[Tuple[datetime, float]]] = {}
 
         # Cross-strategy regime tracking
         self._regime_history: List[str] = []
+
+    @staticmethod
+    def _parse_time(value) -> datetime:
+        if not value:
+            return datetime.now(timezone.utc)
+        t = datetime.fromisoformat(str(value).replace(" ", "T"))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+    def _remember(self, strategy_name: str, closed_at, pnl_pct: float):
+        with self._lock:
+            hist = self._closed.setdefault(strategy_name, [])
+            hist.append((self._parse_time(closed_at), float(pnl_pct)))
+            del hist[:-50]
+
+    def seed_from_trades(self, trades: List[dict]):
+        """Rebuild the recent-trade history from the DB after a restart."""
+        for t in sorted(trades, key=lambda t: str(t.get("closed_at") or "")):
+            self._remember(t["strategy_name"], t.get("closed_at"), t["pnl_pct"])
 
     # ─── Called after every closed trade ──────────────────────────────────────
 
@@ -79,11 +100,12 @@ class LearningEngine:
                         entry_price: float, exit_price: float,
                         pnl: float, pnl_pct: float, side: str,
                         duration_hours: float, exit_reason: str,
-                        entry_features: dict, df=None):
+                        entry_features: dict, df=None, closed_at: str = None):
         """
         Primary hook — called by PortfolioManager immediately after a trade closes.
         """
         won = pnl > 0
+        self._remember(strategy_name, closed_at, pnl_pct)
         regime = "UNKNOWN"
         feature_vec = []
 
@@ -217,9 +239,34 @@ class LearningEngine:
     def get_confidence(self, strategy_name: str, df=None) -> float:
         """
         Return an ML confidence score (0–1) for the next potential trade.
-        Incorporates: recent win rate, ML model probability, and streak adjustment.
+
+        Win rate of the last 20 trades closed within CONFIDENCE_LOOKBACK_DAYS of
+        the latest candle, shrunk toward CONFIDENCE_PRIOR with a weight of
+        MIN_TRADES_FOR_LEARNING trades, minus a losing-streak penalty.
+        The raw win rate used to be taken from as little as ONE trade: a single
+        loss gave 0.0 < CONFIDENCE_THRESHOLD, the strategy stopped trading and,
+        with no new trades, never recovered. Now one loss barely moves it, a
+        real losing streak still pauses entries, and the pause expires as the
+        losses age out of the window (stateless: same result live and replay).
         """
-        base_win_rate = self._win_rates.get(strategy_name, 0.55)
+        if isinstance(getattr(df, "index", None), pd.DatetimeIndex) and len(df):
+            now = df.index[-1].to_pydatetime()   # latest closed candle
+        else:
+            now = datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        since = now - timedelta(days=config.CONFIDENCE_LOOKBACK_DAYS)
+        with self._lock:
+            recent = [p for t, p in self._closed.get(strategy_name, []) if t > since][-20:]
+        wins = sum(1 for p in recent if p > 0)
+        k = config.MIN_TRADES_FOR_LEARNING
+        base_win_rate = (wins + config.CONFIDENCE_PRIOR * k) / (len(recent) + k)
+        streak = 0
+        for p in reversed(recent):
+            if p > 0:
+                break
+            streak += 1
+        penalty = min(0.15, 0.04 * (streak - 2)) if streak >= 3 else 0.0
 
         # Pull RF probability from ML_Adaptive model
         ml_strat = self.strategies.get("ML_Adaptive")
@@ -233,8 +280,6 @@ class LearningEngine:
             except Exception:
                 pass
 
-        # Apply streak penalty
-        penalty = self._confidence_adjustments.get(strategy_name, 0.0)
         return max(0.0, min(1.0, base_win_rate - penalty))
 
     # ─── Journal entry builder ─────────────────────────────────────────────────

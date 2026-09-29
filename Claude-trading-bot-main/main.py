@@ -258,6 +258,8 @@ class TradingBot:
 
         # Load journal entries and restore learned patterns from previous runs
         self.learning.learn_from_all_journal_entries()
+        # Recent closed trades drive the ML confidence; rebuild them after a restart
+        self.learning.seed_from_trades(db.get_trades(limit=5000, book=self.book))
 
         # Initial balance snapshot
         bal = self.portfolio.total_balance(self._current_price)
@@ -407,6 +409,7 @@ class TradingBot:
                 exit_reason=trade.get("exit_reason", ""),
                 entry_features=trade.get("entry_features", {}),
                 df=df_latest,
+                closed_at=trade.get("closed_at"),
             )
             db.set_meta(key, str(trade["id"]))
 

@@ -58,6 +58,11 @@ PF_NO_LOSS_CAP         = 99.99  # PF reported when there are wins but no losses
 MIN_TRADES_FOR_LEARNING = 10    # start ML tuning after N trades
 MODEL_UPDATE_FREQUENCY  = 5     # retrain model every N closed trades
 CONFIDENCE_THRESHOLD    = 0.40  # skip trades with ML confidence below this
+# Confidence = recent win rate shrunk toward CONFIDENCE_PRIOR with a weight of
+# MIN_TRADES_FOR_LEARNING trades, over trades closed in the last N days (so a
+# losing-streak pause expires instead of locking a strategy out forever).
+CONFIDENCE_PRIOR         = 0.55
+CONFIDENCE_LOOKBACK_DAYS = float(os.getenv("CONFIDENCE_LOOKBACK_DAYS", "30"))
 KELLY_FRACTION          = 0.25  # fractional Kelly for position sizing
 
 # ─── Safe self-learning (adaptive_tuner.py) — no LLM involved ────────────────
