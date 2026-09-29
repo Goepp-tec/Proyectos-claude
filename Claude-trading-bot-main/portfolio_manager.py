@@ -111,7 +111,7 @@ class PortfolioManager:
             strat_name = strategy.name
 
             # ── Risk checks ───────────────────────────────────────────────────
-            if not self._risk_check(strat_name, signal, ml_confidence):
+            if not self._risk_check(strat_name, signal, ml_confidence, current_price):
                 return False
 
             open_positions = db.get_open_positions(strat_name)
@@ -284,18 +284,35 @@ class PortfolioManager:
 
     # ─── Risk checks ──────────────────────────────────────────────────────────
 
+    def _strategy_equity(self, strat_name: str, current_price: float) -> float:
+        """Free capital + notional committed in open positions + unrealized PnL."""
+        equity = self._capital.get(strat_name, 0.0)
+        for p in db.get_open_positions(strat_name):
+            ep, qty = float(p["entry_price"]), float(p["quantity"])
+            equity += ep * qty
+            if current_price > 0:
+                equity += (current_price - ep) * qty if p["side"] == "LONG" \
+                    else (ep - current_price) * qty
+        return equity
+
     def _risk_check(self, strat_name: str, signal: Signal,
-                    ml_confidence: float) -> bool:
+                    ml_confidence: float, current_price: float = 0.0) -> bool:
         # ML confidence filter
         if ml_confidence < config.CONFIDENCE_THRESHOLD:
             logger.debug(f"{strat_name}: ML confidence {ml_confidence:.2f} below threshold")
             return False
 
-        # Drawdown guard
-        cap  = self._capital.get(strat_name, 0)
-        peak = self._peak_capital.get(strat_name, cap)
-        if peak > 0 and (peak - cap) / peak > config.MAX_PORTFOLIO_DRAWDOWN_PCT:
-            logger.warning(f"{strat_name}: drawdown limit hit – pausing new entries")
+        # Drawdown guard: compare peak equity with current equity. Free capital
+        # alone drops by the committed notional on every entry, which used to
+        # look like a >20% "drawdown" after a single large position.
+        equity = self._strategy_equity(strat_name, current_price)
+        peak = max(self._peak_capital.get(strat_name, equity), equity)
+        self._peak_capital[strat_name] = peak
+        if peak > 0 and (peak - equity) / peak > config.MAX_PORTFOLIO_DRAWDOWN_PCT:
+            logger.warning(
+                f"{strat_name}: drawdown limit hit ({(peak - equity) / peak:.1%} "
+                f"from peak ${peak:,.2f}) – pausing new entries"
+            )
             return False
 
         # Signal confidence
