@@ -3,7 +3,7 @@ quedo bloqueado por un bug de confianza ML (confianza 0.0 tras la primera
 perdida, sin recuperacion), corregido en el commit e70ac21. Ver
 REPLAY_REPORT_500d_corregido.txt.
 
-REPLAY HISTORICO ACELERADO â€” APRENDE vs BASELINE
+REPLAY HISTORICO ACELERADO — APRENDE vs BASELINE
 ========================================================================
 Generado        : 2026-09-29 04:36 UTC
 Periodo         : 2025-05-17 04:00 -> 2026-09-29 04:00 UTC (500 dias)

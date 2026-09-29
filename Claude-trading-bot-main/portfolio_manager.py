@@ -1,6 +1,6 @@
 """
 Portfolio Manager
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+──────────────────
 Coordinates capital allocation, order execution, position tracking,
 and stop-loss / take-profit enforcement across all active strategies.
 
@@ -36,7 +36,7 @@ class PortfolioManager:
         """
         book           : paper book this manager trades in ('main', 'observe',
                          'baseline'); positions/trades/balances are kept per book.
-        simulate_fills : fill at current_price Â± SLIPPAGE without calling the
+        simulate_fills : fill at current_price ± SLIPPAGE without calling the
                          client (observation mode, baseline shadows, replay).
         clock          : returns the current time as ISO string (replay injects
                          the historical candle time); defaults to real UTC now.
@@ -54,7 +54,7 @@ class PortfolioManager:
 
         self._allocate_capital()
 
-    # â”€â”€â”€ Capital allocation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Capital allocation ───────────────────────────────────────────────────
 
     def _allocate_capital(self, current_price: float = 0.0):
         """
@@ -117,7 +117,7 @@ class PortfolioManager:
         fill = current_price * (1 + config.SLIPPAGE if side == "BUY" else 1 - config.SLIPPAGE)
         return {"orderId": f"SIM_{self.book}", "fills": [{"price": fill, "qty": quantity}]}
 
-    # â”€â”€â”€ Main entry-point called by the bot loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Main entry-point called by the bot loop ──────────────────────────────
 
     def process_signal(self, strategy: BaseStrategy,
                        signal: Signal,
@@ -164,7 +164,7 @@ class PortfolioManager:
                           current_price: float, ml_confidence: float) -> tuple:
         """Returns (placed: bool, reason: str). Caller holds self._lock."""
         strat_name = strategy.name
-        # â”€â”€ Risk checks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Risk checks ───────────────────────────────────────────────────
         if not self._risk_check(strat_name, signal, ml_confidence, current_price):
             return False, "risk_check"
 
@@ -178,14 +178,14 @@ class PortfolioManager:
             logger.warning(f"{strat_name}: insufficient capital (${capital:.2f})")
             return False, "insufficient_capital"
 
-        # â”€â”€ Position sizing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Position sizing ───────────────────────────────────────────────
         quantity, notional = self._size_position(
             capital, current_price, signal, ml_confidence
         )
         if quantity <= 0:
             return False, "zero_size"
 
-        # â”€â”€ Place order â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Place order ───────────────────────────────────────────────────
         side = "BUY" if signal.type == SignalType.BUY else "SELL"
         order = self._place_order(side, quantity, current_price)
         if order is None:
@@ -229,7 +229,7 @@ class PortfolioManager:
         )
         return True, "opened"
 
-    # â”€â”€â”€ Position monitoring â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Position monitoring ──────────────────────────────────────────────────
 
     def check_open_positions(self, current_price: float):
         """
@@ -341,7 +341,7 @@ class PortfolioManager:
 
         return trade_id, net_pnl, pnl_pct, dur_hours, entry_features
 
-    # â”€â”€â”€ Risk checks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Risk checks ──────────────────────────────────────────────────────────
 
     def strategy_equity(self, strat_name: str, current_price: float) -> float:
         """Free capital + notional committed in open positions + unrealized PnL."""
@@ -370,7 +370,7 @@ class PortfolioManager:
         if peak > 0 and (peak - equity) / peak > config.MAX_PORTFOLIO_DRAWDOWN_PCT:
             logger.warning(
                 f"{strat_name}: drawdown limit hit ({(peak - equity) / peak:.1%} "
-                f"from peak ${peak:,.2f}) â€“ pausing new entries"
+                f"from peak ${peak:,.2f}) – pausing new entries"
             )
             return False
 
@@ -380,7 +380,7 @@ class PortfolioManager:
 
         return True
 
-    # â”€â”€â”€ Position sizing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Position sizing ──────────────────────────────────────────────────────
 
     def _size_position(self, capital: float, price: float,
                        signal: Signal, ml_confidence: float
@@ -391,7 +391,7 @@ class PortfolioManager:
         """
         # Base notional as fraction of capital
         base_pct = config.MAX_POSITION_PCT * 0.6   # conservative default
-        # Scale by signal confidence (0.45â€“0.95 maps to 0.5â€“1.2Ã—)
+        # Scale by signal confidence (0.45–0.95 maps to 0.5–1.2×)
         conf_scale = 0.5 + signal.confidence
         # Scale by ML confidence
         ml_scale   = 0.8 + ml_confidence * 0.4
@@ -402,7 +402,7 @@ class PortfolioManager:
         quantity = notional / price
         return round(quantity, 5), notional
 
-    # â”€â”€â”€ Account state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Account state ────────────────────────────────────────────────────────
 
     def total_balance(self, current_price: float) -> dict:
         """Return a dict with total balance, realized and unrealized PnL."""
@@ -462,7 +462,7 @@ class PortfolioManager:
             "breakdown": breakdown,
         }
 
-    # â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ─── Helpers ─────────────────────────────────────────────────────────────
 
     @staticmethod
     def _get_fill_price(order: dict, fallback: float) -> float:
