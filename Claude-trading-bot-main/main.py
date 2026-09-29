@@ -20,6 +20,7 @@ Changes:
   - Added log rotation to prevent unbounded log growth
 """
 
+import json
 import logging
 import logging.handlers
 import os
@@ -97,6 +98,27 @@ def select_trading_mode(strategies, bt_results, allow_unvalidated: bool):
     return list(strategies), "observe", "OBSERVE"
 
 
+def resolve_trading_mode(strategies, bt_results, allow_unvalidated: bool, lock: bool = False):
+    """
+    select_trading_mode(), optionally locked: with lock=True the mode and active
+    set chosen at the first start are stored and reused on every restart, so a
+    long test run keeps comparing the same books even if the startup backtest
+    (re-run on each restart over a shifted 500-day window) changes its verdict.
+    """
+    if lock:
+        saved = db.get_meta("trading_mode_lock")
+        if saved:
+            s = json.loads(saved)
+            active = [x for x in strategies if x.name in set(s["active"])]
+            logger.info(f"Trading mode locked by the running test: {s['mode']} ({s['book']})")
+            return active, s["book"], s["mode"]
+    active, book, mode = select_trading_mode(strategies, bt_results, allow_unvalidated)
+    if lock:
+        db.set_meta("trading_mode_lock", json.dumps(
+            {"mode": mode, "book": book, "active": [x.name for x in active]}))
+    return active, book, mode
+
+
 def make_portfolio(client, strategies, book: str, clock=None) -> PortfolioManager:
     """Only the 'main' book sends orders through the client (paper or live)."""
     return PortfolioManager(client, strategies, book=book,
@@ -140,6 +162,7 @@ class TradingBot:
         self.learning:   LearningEngine   = None
         self.book = "main"      # book the (learning) strategies trade in
         self.mode = "TRADE"
+        self.lock_mode = False  # test runs lock the first-start mode across restarts
         self.baselines = []     # frozen default-param copies (book 'baseline')
         self.baseline_portfolio: PortfolioManager = None
         self.tuner: AdaptiveTuner = None
@@ -193,8 +216,9 @@ class TradingBot:
 
         # Decide what trades: validated strategies, all (only if explicitly
         # allowed) or nothing — observation mode.
-        active, self.book, self.mode = select_trading_mode(
-            self.strategies, bt_results, config.ALLOW_UNVALIDATED_STRATEGIES
+        active, self.book, self.mode = resolve_trading_mode(
+            self.strategies, bt_results, config.ALLOW_UNVALIDATED_STRATEGIES,
+            lock=self.lock_mode,
         )
         active_names = {s.name for s in active}
         trades_main = self.book == "main"
