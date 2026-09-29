@@ -21,7 +21,17 @@ def _prices(n=900, seed=11, freq="4h"):
     df = pd.DataFrame({"open": open_, "high": np.maximum(open_, close) + wick,
                        "low": np.minimum(open_, close) - wick, "close": close,
                        "volume": vol}, index=idx)
-    return add_all_indicators(df)
+    df = add_all_indicators(df)
+    # synthetic market-data columns (see market_data.enrich) for the modern strategies
+    t = np.arange(n)
+    df["fng"] = 50 + 45 * np.sin(t / 25)
+    df["funding_rate"] = 0.0003 + 0.0009 * np.sin(t / 15)
+    df["top_pos_ratio"] = 1.5 + np.cumsum(rng.normal(0, 0.05, n))
+    df["global_ratio"] = 1.4 + np.cumsum(rng.normal(0, 0.05, n))
+    df["top_acc_ratio"] = 1.3 + np.cumsum(rng.normal(0, 0.03, n))
+    df["taker_ratio"] = 1.0 + rng.normal(0, 0.1, n)
+    df["oi_value"] = 7e9 * (1 + np.cumsum(rng.normal(0, 0.01, n)))
+    return df
 
 
 def test_catalog_is_not_empty_and_names_are_unique():

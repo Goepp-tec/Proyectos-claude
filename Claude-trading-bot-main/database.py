@@ -180,6 +180,17 @@ def init_db():
         )
     """)
 
+    # Free market data (market_data.py): futures positioning, funding, Fear & Greed.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS market_data (
+            symbol  TEXT NOT NULL,
+            metric  TEXT NOT NULL,
+            ts      TEXT NOT NULL,      -- ISO UTC, when the value was published
+            value   REAL NOT NULL,
+            PRIMARY KEY (symbol, metric, ts)
+        )
+    """)
+
     # Strategy evaluator: current rating per strategy + history of evaluations.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS strategy_status (

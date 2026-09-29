@@ -95,6 +95,16 @@ LEARNING_ROLLBACK_WINDOW_HOURS = _env_num("LEARNING_ROLLBACK_WINDOW_HOURS", 72)
 LEARNING_ROLLBACK_TOLERANCE_PCT = _env_num("LEARNING_ROLLBACK_TOLERANCE_PCT", 0.02)  # of capital
 BASELINE_ML_CONFIDENCE         = 0.55   # frozen baselines use a fixed ML confidence
 
+# ─── Free market data (market_data.py) — no API key needed ────────────────────
+# Binance USD-M futures public data: top-trader and all-account long/short
+# ratios, taker buy/sell volume, open interest (only the last 30 days exist, so
+# they are collected every hour from now on) and funding rates (years of
+# history); plus the alternative.me crypto Fear & Greed index (since 2018).
+BINANCE_FUTURES_BASE       = os.getenv("BINANCE_FUTURES_BASE", "https://fapi.binance.com")
+FEAR_GREED_URL             = os.getenv("FEAR_GREED_URL", "https://api.alternative.me/fng/")
+MARKET_DATA_INTERVAL_MIN   = _env_num("MARKET_DATA_INTERVAL_MIN", 60)
+MARKET_FUNDING_BACKFILL_DAYS = _env_num("MARKET_FUNDING_BACKFILL_DAYS", 1600, int)
+
 # ─── Strategy evaluator (strategy_evaluator.py): viability per strategy ──────
 EVAL_ENABLED            = os.getenv("EVAL_ENABLED", "true").lower() == "true"
 EVAL_INTERVAL_HOURS     = _env_num("EVAL_INTERVAL_HOURS", 24)
@@ -293,6 +303,27 @@ STRATEGY_PARAMS = {
     },
     "Golden_Cross_50_200": {
         "fast_period": 50, "slow_period": 200, "atr_sl_mult": 2.5, "atr_tp_mult": 6.0,
+        "candle_interval": "1d",
+    },
+    # Modern catalog (strategies/modern_catalog.py) — free market data + books
+    "FearGreed_Contrarian": {
+        "fear_max": 20, "greed_min": 80, "atr_sl_mult": 2.0, "atr_tp_mult": 3.0,
+        "candle_interval": "1d",
+    },
+    "Funding_Contrarian": {
+        "funding_high": 0.0005, "funding_low": -0.0001, "atr_sl_mult": 1.5, "atr_tp_mult": 3.0,
+        "candle_interval": "4h",
+    },
+    "TopTraders_Follow": {
+        "z_entry": 1.5, "lookback": 72, "atr_sl_mult": 1.5, "atr_tp_mult": 3.0,
+        "candle_interval": "1h",
+    },
+    "Crowd_vs_TopTraders": {
+        "z_entry": 1.5, "lookback": 72, "atr_sl_mult": 1.5, "atr_tp_mult": 3.0,
+        "candle_interval": "1h",
+    },
+    "Carver_EWMAC": {
+        "fast_period": 16, "threshold": 10, "atr_sl_mult": 2.0, "atr_tp_mult": 4.0,
         "candle_interval": "1d",
     },
 }

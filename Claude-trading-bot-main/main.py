@@ -41,6 +41,7 @@ from adaptive_tuner import AdaptiveTuner
 from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES
 from strategy_evaluator import StrategyEvaluator
 from risk_engine import RiskEngine, RiskSettings, profile as risk_profile
+from market_data import MarketDataCollector, enrich as enrich_market_data
 
 # ─── Logging setup ────────────────────────────────────────────────────────────
 # Console handler with colors (if available)
@@ -194,6 +195,8 @@ class TradingBot:
         self.lab_portfolio: PortfolioManager = None
         self.evaluator: StrategyEvaluator = None
         self.risk: RiskEngine = None   # budget / aggressiveness for the learning book
+        # Free positioning / funding / Fear & Greed data, joined to every candle
+        self.market = MarketDataCollector(config.SYMBOL)
         self._strat_dfs: Dict[str, object] = {}
         self._logged_candle: Dict[str, str] = {}
         self._current_price: float = 0.0
@@ -491,6 +494,7 @@ class TradingBot:
                 strat_dict = {s.name: s for s in self.strategies}
                 self.learning.update_performance_snapshots(strat_dict)
 
+                self.market.update()          # throttled to MARKET_DATA_INTERVAL_MIN
                 if config.EVAL_ENABLED and self.evaluator:
                     self.evaluator.run_cycle_if_due()
                 if config.LEARNING_ENABLED and self.tuner:
@@ -594,7 +598,7 @@ class TradingBot:
                     config.SYMBOL, interval, limit=config.LOOKBACK_CANDLES
                 )
                 if df is not None and not df.empty:
-                    self._strat_dfs[interval] = df
+                    self._strat_dfs[interval] = enrich_market_data(df, config.SYMBOL, interval)
                     logger.debug(f"Refreshed {interval} candles: {len(df)} rows")
             except Exception as e:
                 logger.error(f"[candles] Error refreshing {interval}: {e}")
@@ -605,7 +609,7 @@ class TradingBot:
 
     def _learning_history(self, interval: str, days: int, end: datetime):
         df = self.client.get_historical_klines(config.SYMBOL, interval, days)
-        return df[df.index < end]
+        return enrich_market_data(df[df.index < end], config.SYMBOL, interval)
 
     def _get_strat_interval(self, name: str) -> str:
         for s in self.strategies:

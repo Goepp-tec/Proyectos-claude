@@ -13,6 +13,8 @@ from .ema_crossover import EMACrossoverStrategy
 from .breakout import BreakoutStrategy
 from .classic_catalog import (TurtleBreakoutStrategy, ConnorsRSI2Strategy, BollingerSqueezeStrategy,
                               SupertrendStrategy, GoldenCross50200Strategy)
+from .modern_catalog import (FearGreedContrarianStrategy, FundingContrarianStrategy,
+                             TopTradersFollowStrategy, CrowdVsTopTradersStrategy, CarverEWMACStrategy)
 
 ALL_STRATEGIES = [
     EMA5MomentumStrategy,           # 1 – Short-window EMA momentum     (~145% CAGR)
@@ -38,4 +40,10 @@ CANDIDATE_STRATEGIES = [
     BollingerSqueezeStrategy,       # Bollinger Squeeze
     SupertrendStrategy,             # Supertrend 10 x 3
     GoldenCross50200Strategy,       # 50/200 golden cross
+    # Modern: free positioning / funding / sentiment data (market_data.py) + books
+    FearGreedContrarianStrategy,    # Fear & Greed extremes, contrarian
+    FundingContrarianStrategy,      # crowded funding, contrarian
+    TopTradersFollowStrategy,       # follow Binance top traders' position build-ups
+    CrowdVsTopTradersStrategy,      # fade the crowd when top traders disagree
+    CarverEWMACStrategy,            # Carver, Systematic Trading: EWMAC 16/64
 ]
