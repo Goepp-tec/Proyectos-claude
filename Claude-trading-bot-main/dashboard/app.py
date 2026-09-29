@@ -339,9 +339,7 @@ def _render_strategies():
 
     # Get current price for unrealized P&L calculation
     try:
-        from binance_client import BinanceClient
-        client = BinanceClient()
-        current_price = client.get_current_price(config.SYMBOL)
+        current_price = _get_price_fetcher().get_current_price(config.SYMBOL)
     except Exception:
         current_price = 0.0
 

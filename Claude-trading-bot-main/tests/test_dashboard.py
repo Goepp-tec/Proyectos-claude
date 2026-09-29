@@ -26,6 +26,23 @@ def test_kpi_refresh_reuses_one_price_fetcher_and_never_opens_websockets(temp_db
     ws.assert_not_called()
 
 
+def test_strategy_performance_tab_never_builds_a_client_per_refresh(temp_db):
+    """That tab still built a BinanceClient (REST pings + a WebSocket thread that
+    is never stopped) on every 10 s refresh: a leak while the page stays open."""
+    import binance_client
+    from dashboard import app as dash_app
+
+    db.upsert_strategy("EMA5_Momentum", capital=100, params={}, is_active=True)
+    dash_app._price_fetcher = None
+    with patch.object(binance_client, "BinanceClient") as client, \
+         patch.object(binance_client, "BinancePublicDataFetcher") as fetcher:
+        fetcher.return_value.get_current_price.return_value = 50_000.0
+        for _ in range(5):
+            dash_app._render_strategies()
+    client.assert_not_called()
+    assert fetcher.call_count <= 1
+
+
 def test_learning_tab_renders_audit_and_learner_vs_baseline(temp_db):
     import json
     from dashboard import app as dash_app
@@ -107,7 +124,7 @@ def test_market_tab_shows_positioning_funding_and_sentiment(temp_db):
     from dashboard import app as dash_app
     from market_data import MarketDataCollector
     from tests.test_market_data import T0, _fake_http
-    MarketDataCollector("BTCUSDT", http_get=_fake_http(), clock=lambda: T0).update(force=True)
+    MarketDataCollector("BTCUSDT", http=_fake_http(), clock=lambda: T0).update(force=True)
     out = _dump(dash_app._render_market())
     for text in ("Miedo y Codicia", "Top traders", "Todas las cuentas", "Funding", "tab-market"[4:]):
         assert text in out, text
