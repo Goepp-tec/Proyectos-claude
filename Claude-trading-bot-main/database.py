@@ -159,6 +159,27 @@ def init_db():
         )
     """)
 
+    # Learning audit: every parameter proposal and what happened to it.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS learning_audit (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts              TEXT NOT NULL,
+            strategy_name   TEXT NOT NULL,
+            param           TEXT,
+            old_value       REAL,
+            new_value       REAL,
+            metrics_before  TEXT DEFAULT '{}',   -- JSON
+            metrics_after   TEXT DEFAULT '{}',   -- JSON
+            decision        TEXT NOT NULL,       -- applied / rejected / rollback
+            reason          TEXT,
+            book            TEXT,                -- book of the learning strategy
+            evaluate_after  TEXT,                -- applied: when to check for rollback
+            evaluated       INTEGER DEFAULT 0,   -- applied: 1 once kept or rolled back
+            learner_equity  REAL,                -- equity snapshots when applied
+            baseline_equity REAL
+        )
+    """)
+
     # Paper "books": 'main' (what the bot trades), 'observe' (observation-mode
     # theoretical trades), 'baseline' (frozen-parameter shadow copies).
     for table in ("positions", "trades", "balance_history"):
@@ -265,6 +286,64 @@ def get_signals(book: Optional[str] = None, limit: int = 200) -> List[Dict]:
         params + (limit,)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def record_learning_audit(ts: str, strategy_name: str, decision: str, reason: str,
+                          param: str = None, old_value: float = None, new_value: float = None,
+                          metrics_before: dict = None, metrics_after: dict = None,
+                          book: str = None, evaluate_after: str = None,
+                          learner_equity: float = None, baseline_equity: float = None) -> int:
+    conn = get_conn()
+    cur = conn.execute("""
+        INSERT INTO learning_audit (ts, strategy_name, param, old_value, new_value,
+            metrics_before, metrics_after, decision, reason, book, evaluate_after,
+            learner_equity, baseline_equity)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (ts, strategy_name, param, old_value, new_value,
+          json.dumps(metrics_before or {}), json.dumps(metrics_after or {}),
+          decision, reason, book, evaluate_after, learner_equity, baseline_equity))
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_learning_audit(strategy_name: str = None, decision: str = None,
+                       limit: int = 500) -> List[Dict]:
+    where, params = "WHERE 1=1", ()
+    if strategy_name:
+        where, params = where + " AND strategy_name=?", params + (strategy_name,)
+    if decision:
+        where, params = where + " AND decision=?", params + (decision,)
+    rows = get_conn().execute(
+        f"SELECT * FROM learning_audit {where} ORDER BY id DESC LIMIT ?", params + (limit,)
+    ).fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["metrics_before"] = json.loads(d.get("metrics_before") or "{}")
+        d["metrics_after"] = json.loads(d.get("metrics_after") or "{}")
+        result.append(d)
+    return result
+
+
+def get_pending_learning_changes() -> List[Dict]:
+    rows = get_conn().execute(
+        "SELECT * FROM learning_audit WHERE decision='applied' AND evaluated=0 ORDER BY id"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_learning_change_evaluated(audit_id: int):
+    conn = get_conn()
+    conn.execute("UPDATE learning_audit SET evaluated=1 WHERE id=?", (audit_id,))
+    conn.commit()
+
+
+def count_trades_since(strategy_name: str, since_iso: str, book: str) -> int:
+    row = get_conn().execute(
+        "SELECT COUNT(*) FROM trades WHERE strategy_name=? AND book=? AND is_backtest=0 "
+        "AND closed_at > ?", (strategy_name, book, since_iso)
+    ).fetchone()
+    return int(row[0] or 0)
 
 
 def upsert_strategy(name: str, capital: float, params: dict,

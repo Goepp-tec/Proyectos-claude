@@ -60,6 +60,26 @@ MODEL_UPDATE_FREQUENCY  = 5     # retrain model every N closed trades
 CONFIDENCE_THRESHOLD    = 0.40  # skip trades with ML confidence below this
 KELLY_FRACTION          = 0.25  # fractional Kelly for position sizing
 
+# ─── Safe self-learning (adaptive_tuner.py) — no LLM involved ────────────────
+def _env_num(name: str, default, cast=float):
+    return cast(os.getenv(name, str(default)))
+
+LEARNING_ENABLED               = os.getenv("LEARNING_ENABLED", "true").lower() == "true"
+LEARNING_INTERVAL_HOURS        = _env_num("LEARNING_INTERVAL_HOURS", 24)
+LEARNING_MIN_NEW_TRADES        = _env_num("LEARNING_MIN_NEW_TRADES", 3, int)   # new closed trades, or…
+LEARNING_MIN_NEW_DAYS          = _env_num("LEARNING_MIN_NEW_DAYS", 1)          # …days of new data
+LEARNING_PROPOSAL_DAYS         = _env_num("LEARNING_PROPOSAL_DAYS", 180, int)  # window used to propose
+LEARNING_VALIDATION_DAYS       = _env_num("LEARNING_VALIDATION_DAYS", 180, int)  # later, unseen window
+LEARNING_WARMUP_DAYS           = _env_num("LEARNING_WARMUP_DAYS", 300, int)    # indicator warm-up
+LEARNING_MIN_VALIDATION_TRADES = _env_num("LEARNING_MIN_VALIDATION_TRADES", 10, int)
+LEARNING_MIN_PF_IMPROVEMENT    = _env_num("LEARNING_MIN_PF_IMPROVEMENT", 0.05)  # +5% PF out of sample
+LEARNING_MAX_DD_WORSENING      = _env_num("LEARNING_MAX_DD_WORSENING", 0.02)   # max +2 pts drawdown
+LEARNING_PF_CAP                = 10.0   # PF above this counts as 10 (few / no losses)
+LEARNING_MAX_CHANGES_PER_DAY   = _env_num("LEARNING_MAX_CHANGES_PER_DAY", 1, int)  # per strategy
+LEARNING_ROLLBACK_WINDOW_HOURS = _env_num("LEARNING_ROLLBACK_WINDOW_HOURS", 72)
+LEARNING_ROLLBACK_TOLERANCE_PCT = _env_num("LEARNING_ROLLBACK_TOLERANCE_PCT", 0.02)  # of capital
+BASELINE_ML_CONFIDENCE         = 0.55   # frozen baselines use a fixed ML confidence
+
 # Claude API for journal generation (optional — enhances reflection quality)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
