@@ -219,6 +219,49 @@ STRATEGY_PARAMS = {
         "atr_sl_mult":       1.5,
         "candle_interval":  "1d",
     },
+
+    # ── Candidate catalog (strategies/__init__.py CANDIDATE_STRATEGIES) ──────
+    # Rated by strategy_evaluator.py; they only trade in the learning book once
+    # rated VIABLE (or CONDITIONAL, in a market regime where they work).
+    # The first four already existed in the repo but crashed at construction
+    # (no entry here); their values are the ones that were hard-coded.
+    "RSI_Bollinger": {
+        "rsi_period": 14, "bb_period": 20,
+        "rsi_oversold": 30, "rsi_overbought": 70,
+        "candle_interval": "4h",
+    },
+    "MACD_Momentum": {
+        "trend_ema": 200, "atr_sl_mult": 1.5, "atr_tp_mult": 3.0,
+        "candle_interval": "1h",
+    },
+    "EMA_Crossover": {
+        "trend_ema": 50, "atr_sl_mult": 2.0, "atr_tp_mult": 4.0,
+        "candle_interval": "1h",
+    },
+    "Breakout": {
+        "lookback": 24, "atr_period": 14, "volume_multiplier": 1.8,
+        "atr_tp_mult": 2.5, "candle_interval": "4h",
+    },
+    "Turtle_Breakout": {
+        "entry_period": 20, "atr_sl_mult": 2.0, "atr_tp_mult": 4.0,
+        "candle_interval": "1d",
+    },
+    "Connors_RSI2": {
+        "rsi_low": 10, "rsi_high": 90, "atr_sl_mult": 2.0, "atr_tp_mult": 1.5,
+        "candle_interval": "1d",
+    },
+    "Bollinger_Squeeze": {
+        "bb_period": 20, "bb_std": 2.0, "squeeze_lookback": 120, "squeeze_quantile": 0.15,
+        "atr_sl_mult": 1.5, "atr_tp_mult": 3.0, "candle_interval": "4h",
+    },
+    "Supertrend": {
+        "atr_period": 10, "multiplier": 3.0, "atr_tp_mult": 3.0,
+        "candle_interval": "4h",
+    },
+    "Golden_Cross_50_200": {
+        "fast_period": 50, "slow_period": 200, "atr_sl_mult": 2.5, "atr_tp_mult": 6.0,
+        "candle_interval": "1d",
+    },
 }
 
 

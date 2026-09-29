@@ -12,18 +12,25 @@ Best suited for: volatile breakout phases with high volume confirmation.
 import pandas as pd
 
 import config
-from .base_strategy import BaseStrategy, Signal, SignalType
+from .base_strategy import BaseStrategy, ParamSpec, Signal, SignalType
 
 
 class BreakoutStrategy(BaseStrategy):
 
+    SOURCE = "Volume-confirmed range breakout (classic price/volume setup); repo strategy, previously unregistered"
+    TUNABLE_PARAMS = {
+        "lookback": ParamSpec(min=12, max=48, step=4),
+        "volume_multiplier": ParamSpec(min=1.2, max=3.0, step=0.2),
+        "atr_tp_mult": ParamSpec(min=1.5, max=4.0, step=0.5),
+    }
+
     def __init__(self, params: dict = None):
-        defaults = config.STRATEGY_PARAMS["Breakout"].copy()
+        defaults = config.STRATEGY_PARAMS.get("Breakout", {})
         defaults = dict(defaults)   # never mutate the shared config.STRATEGY_PARAMS
         if params:
             defaults.update(params)
         super().__init__("Breakout", defaults)
-        self._last_signal_candle: int = -999   # prevent re-entry
+        self._last_signal_ts = None   # candle time of the last signal (cool-down)
 
     @property
     def min_candles(self) -> int:
@@ -52,8 +59,12 @@ class BreakoutStrategy(BaseStrategy):
         rolling_high = float(df["high"].iloc[-(lb+1):-1].max())
         rolling_low  = float(df["low"].iloc[-(lb+1):-1].min())
 
-        current_idx = len(df)
-        since_last  = current_idx - self._last_signal_candle
+        # Candles since the last signal, measured on the candle timestamps: the
+        # old len(df) counter never advanced with a fixed-size window, so after
+        # its first signal the strategy never fired again.
+        since_last = 999
+        if self._last_signal_ts is not None and self._last_signal_ts in df.index:
+            since_last = len(df) - 1 - df.index.get_loc(self._last_signal_ts)
 
         # Cool-down: no new signals within 3 candles of last signal
         if since_last < 3:
@@ -65,10 +76,10 @@ class BreakoutStrategy(BaseStrategy):
 
         # ── Upside Breakout ────────────────────────────────────────────────────
         if close > rolling_high and prev["close"] <= rolling_high:
-            self._last_signal_candle = current_idx
+            self._last_signal_ts = df.index[-1]
             confidence = self._calc_confidence(vol_r, vmul, atr, close, long=True)
             sl = low - 0.5 * atr               # just below candle low
-            tp = close + 2.5 * atr
+            tp = close + float(self.params.get("atr_tp_mult", 2.5)) * atr
             return Signal(
                 SignalType.BUY, confidence,
                 stop_loss=sl, take_profit=tp,
@@ -78,10 +89,10 @@ class BreakoutStrategy(BaseStrategy):
 
         # ── Downside Breakdown ─────────────────────────────────────────────────
         if close < rolling_low and prev["close"] >= rolling_low:
-            self._last_signal_candle = current_idx
+            self._last_signal_ts = df.index[-1]
             confidence = self._calc_confidence(vol_r, vmul, atr, close, long=False)
             sl = high + 0.5 * atr              # just above candle high
-            tp = close - 2.5 * atr
+            tp = close - float(self.params.get("atr_tp_mult", 2.5)) * atr
             return Signal(
                 SignalType.SELL, confidence,
                 stop_loss=sl, take_profit=tp,

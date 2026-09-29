@@ -12,13 +12,20 @@ Best suited for: ranging / low-ADX markets
 import pandas as pd
 
 import config
-from .base_strategy import BaseStrategy, Signal, SignalType
+from .base_strategy import BaseStrategy, ParamSpec, Signal, SignalType
 
 
 class RSIBollingerStrategy(BaseStrategy):
 
+    SOURCE = ("Classic mean reversion: J. Bollinger, 'Bollinger on Bollinger Bands' (2001) "
+              "+ J. W. Wilder RSI (1978); repo strategy, previously unregistered")
+    TUNABLE_PARAMS = {
+        "rsi_oversold": ParamSpec(min=20, max=40, step=1),
+        "rsi_overbought": ParamSpec(min=60, max=80, step=1),
+    }
+
     def __init__(self, params: dict = None):
-        defaults = config.STRATEGY_PARAMS["RSI_Bollinger"].copy()
+        defaults = config.STRATEGY_PARAMS.get("RSI_Bollinger", {})
         defaults = dict(defaults)   # never mutate the shared config.STRATEGY_PARAMS
         if params:
             defaults.update(params)

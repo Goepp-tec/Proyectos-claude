@@ -12,13 +12,19 @@ Best suited for: trending markets (ADX > 25)
 import pandas as pd
 
 import config
-from .base_strategy import BaseStrategy, Signal, SignalType
+from .base_strategy import BaseStrategy, ParamSpec, Signal, SignalType
 
 
 class MACDMomentumStrategy(BaseStrategy):
 
+    SOURCE = "Gerald Appel MACD (1979) crossover with EMA-200 trend filter; repo strategy, previously unregistered"
+    TUNABLE_PARAMS = {
+        "atr_sl_mult": ParamSpec(min=1.0, max=3.0, step=0.25),
+        "atr_tp_mult": ParamSpec(min=2.0, max=6.0, step=0.5),
+    }
+
     def __init__(self, params: dict = None):
-        defaults = config.STRATEGY_PARAMS["MACD_Momentum"].copy()
+        defaults = config.STRATEGY_PARAMS.get("MACD_Momentum", {})
         defaults = dict(defaults)   # never mutate the shared config.STRATEGY_PARAMS
         if params:
             defaults.update(params)
@@ -58,8 +64,8 @@ class MACDMomentumStrategy(BaseStrategy):
         bullish_cross = (macd_prev <= signal_prev) and (macd_now > signal_now)
         if bullish_cross and close > ema200:
             confidence = self._confidence_from_histogram(hist_now, close, adx, long=True)
-            sl = close - 1.5 * atr
-            tp = close + 3.0 * atr
+            sl = close - float(self.params.get("atr_sl_mult", 1.5)) * atr
+            tp = close + float(self.params.get("atr_tp_mult", 3.0)) * atr
             return Signal(
                 SignalType.BUY, confidence,
                 stop_loss=sl, take_profit=tp,
@@ -71,8 +77,8 @@ class MACDMomentumStrategy(BaseStrategy):
         bearish_cross = (macd_prev >= signal_prev) and (macd_now < signal_now)
         if bearish_cross and close < ema200:
             confidence = self._confidence_from_histogram(hist_now, close, adx, long=False)
-            sl = close + 1.5 * atr
-            tp = close - 3.0 * atr
+            sl = close + float(self.params.get("atr_sl_mult", 1.5)) * atr
+            tp = close - float(self.params.get("atr_tp_mult", 3.0)) * atr
             return Signal(
                 SignalType.SELL, confidence,
                 stop_loss=sl, take_profit=tp,

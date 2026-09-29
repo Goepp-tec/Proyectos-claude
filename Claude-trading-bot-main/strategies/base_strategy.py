@@ -52,6 +52,7 @@ class BaseStrategy(ABC):
     """
 
     TUNABLE_PARAMS: Dict[str, ParamSpec] = {}
+    SOURCE: str = ""   # where a catalog strategy comes from (book, author, public setup)
 
     def __init__(self, name: str, params: Dict[str, Any]):
         self.name = name

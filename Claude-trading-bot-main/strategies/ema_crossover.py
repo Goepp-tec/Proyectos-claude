@@ -12,13 +12,19 @@ Best suited for: moderate trends, especially on 1H chart.
 import pandas as pd
 
 import config
-from .base_strategy import BaseStrategy, Signal, SignalType
+from .base_strategy import BaseStrategy, ParamSpec, Signal, SignalType
 
 
 class EMACrossoverStrategy(BaseStrategy):
 
+    SOURCE = "EMA 9/21 crossover with EMA-50 filter (common trend-following setup); repo strategy, previously unregistered"
+    TUNABLE_PARAMS = {
+        "atr_sl_mult": ParamSpec(min=1.0, max=3.0, step=0.25),
+        "atr_tp_mult": ParamSpec(min=2.0, max=6.0, step=0.5),
+    }
+
     def __init__(self, params: dict = None):
-        defaults = config.STRATEGY_PARAMS["EMA_Crossover"].copy()
+        defaults = config.STRATEGY_PARAMS.get("EMA_Crossover", {})
         defaults = dict(defaults)   # never mutate the shared config.STRATEGY_PARAMS
         if params:
             defaults.update(params)
@@ -56,8 +62,8 @@ class EMACrossoverStrategy(BaseStrategy):
             # Spread between EMAs as trend strength proxy
             spread = (ema9_now - ema21_now) / (ema21_now + 1e-8)
             confidence = self._calc_confidence(spread, adx, vol_r, long=True)
-            sl = close - 2.0 * atr
-            tp = close + 4.0 * atr
+            sl = close - float(self.params.get("atr_sl_mult", 2.0)) * atr
+            tp = close + float(self.params.get("atr_tp_mult", 4.0)) * atr
             return Signal(
                 SignalType.BUY, confidence,
                 stop_loss=sl, take_profit=tp,
@@ -70,8 +76,8 @@ class EMACrossoverStrategy(BaseStrategy):
         if death_cross and close < ema50_now:
             spread = (ema21_now - ema9_now) / (ema21_now + 1e-8)
             confidence = self._calc_confidence(spread, adx, vol_r, long=False)
-            sl = close + 2.0 * atr
-            tp = close - 4.0 * atr
+            sl = close + float(self.params.get("atr_sl_mult", 2.0)) * atr
+            tp = close - float(self.params.get("atr_tp_mult", 4.0)) * atr
             return Signal(
                 SignalType.SELL, confidence,
                 stop_loss=sl, take_profit=tp,
