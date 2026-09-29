@@ -31,6 +31,15 @@ def _prices(n=900, seed=11, freq="4h"):
     df["top_acc_ratio"] = 1.3 + np.cumsum(rng.normal(0, 0.03, n))
     df["taker_ratio"] = 1.0 + rng.normal(0, 0.1, n)
     df["oi_value"] = 7e9 * (1 + np.cumsum(rng.normal(0, 0.01, n)))
+    df["okx_top_pos_ratio"] = 1.0 + np.cumsum(rng.normal(0, 0.03, n))
+    df["okx_top_acc_ratio"] = 1.1 + np.cumsum(rng.normal(0, 0.03, n))
+    df["okx_global_ratio"] = 1.4 + np.cumsum(rng.normal(0, 0.03, n))
+    df["hl_top_net"] = 0.7 * np.sin(t / 8)
+    df["hl_top_net_count"] = 0.5 * np.sin(t / 8)
+    df["hl_top_holders"] = 12.0
+    week = t // 7                                       # COT is weekly: a step series
+    df["cot_am_net"] = 0.15 + 0.1 * np.sin(week / 6)
+    df["cot_lev_net"] = -0.3 + 0.1 * np.cos(week / 6)
     return df
 
 

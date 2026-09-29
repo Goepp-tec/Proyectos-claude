@@ -104,6 +104,17 @@ BINANCE_FUTURES_BASE       = os.getenv("BINANCE_FUTURES_BASE", "https://fapi.bin
 FEAR_GREED_URL             = os.getenv("FEAR_GREED_URL", "https://api.alternative.me/fng/")
 MARKET_DATA_INTERVAL_MIN   = _env_num("MARKET_DATA_INTERVAL_MIN", 60)
 MARKET_FUNDING_BACKFILL_DAYS = _env_num("MARKET_FUNDING_BACKFILL_DAYS", 1600, int)
+# Top traders beyond Binance (all public, no key): OKX top-trader ratios, the
+# on-chain positions of Hyperliquid's most profitable wallets, and the CFTC
+# Commitments of Traders report for CME Bitcoin / Ether futures.
+OKX_BASE                   = os.getenv("OKX_BASE", "https://www.okx.com")
+HL_INFO_URL                = os.getenv("HL_INFO_URL", "https://api.hyperliquid.xyz/info")
+HL_LEADERBOARD_URL         = os.getenv("HL_LEADERBOARD_URL", "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard")
+HL_TOP_WALLETS             = _env_num("HL_TOP_WALLETS", 150, int)          # wallets followed
+HL_MIN_ACCOUNT_USD         = _env_num("HL_MIN_ACCOUNT_USD", 100_000)
+HL_MAX_TURNOVER            = _env_num("HL_MAX_TURNOVER", 300)    # month volume / account: market makers above
+HL_WALLET_REFRESH_HOURS    = _env_num("HL_WALLET_REFRESH_HOURS", 24)
+CFTC_URL                   = os.getenv("CFTC_URL", "https://publicreporting.cftc.gov/resource/gpe5-46if.json")
 
 # ─── Strategy evaluator (strategy_evaluator.py): viability per strategy ──────
 EVAL_ENABLED            = os.getenv("EVAL_ENABLED", "true").lower() == "true"

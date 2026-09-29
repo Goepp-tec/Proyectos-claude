@@ -23,7 +23,7 @@ def _bot():
     bot.client.get_historical_klines.return_value = candles
     strat = Mock(is_active=True, candle_interval="1h")
     bot.strategies, bot._strat_dfs = [strat], {}
-    bot.market = MarketDataCollector(config.SYMBOL, http_get=_fake_http(), clock=lambda: T0)
+    bot.market = MarketDataCollector(config.SYMBOL, http=_fake_http(), clock=lambda: T0)
     return bot
 
 
