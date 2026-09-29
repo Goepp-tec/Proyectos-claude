@@ -1,0 +1,264 @@
+REPORTE - CORRIDA DEMO (PAPER TRADING) DE Claude-trading-bot
+=============================================================
+Fecha de la corrida : 2026-09-29 (UTC)
+Proyecto            : https://github.com/benclawbot/Claude-trading-bot (zip Claude-trading-bot-main)
+Entorno             : contenedor cloud Linux temporal, red con proxy
+Repo con evidencias : https://github.com/Goepp-tec/Proyectos-claude
+Rama                : claude/trading-bot-demo-setup-55kn2p  (sin PR)
+Carpeta evidencias  : Claude-trading-bot-main/evidencias/
+
+RESUMEN
+-------
+El bot corrio en modo demo ~13 minutos (01:39:25 -> 01:52:13 UTC) con precios
+REALES de Binance, abrio 1 paper trade, no registro errores, el dashboard
+respondio HTTP 200 todo el tiempo y se detuvo limpio. Ninguna estrategia paso el
+backtest. Para que arrancara hizo falta un cambio de 3 lineas en la URL de datos.
+
+
+1. ACCESO A BINANCE Y ORIGEN DE LOS PRECIOS
+-------------------------------------------
+Pruebas con curl antes de instalar:
+  https://api.binance.com/api/v3/ping          -> HTTP 451 (region restringida)
+  https://testnet.binance.vision/api/v3/ping   -> HTTP 451
+  https://data-api.binance.vision/api/v3/ping  -> HTTP 200 (mirror oficial de datos publicos)
+  https://api.binance.us/api/v3/ping           -> HTTP 200 (solo como referencia de precio)
+
+Conclusion: NO hay acceso directo a api.binance.com.
+
+- El .txt de instrucciones decia que sin acceso el bot caeria a datos simulados
+  (movimiento browniano). ESE FALLBACK NO EXISTE en el codigo actual:
+  BinancePublicDataFetcher._check_connectivity() lanza ConnectionError y
+  main.py hace sys.exit(1) ("Cannot connect to Binance"). Reproducido:
+    ConnectionError: Cannot reach Binance API at https://api.binance.com:
+    451 Client Error: for url: https://api.binance.com/api/v3/ping
+- data-api.binance.vision sirve los mismos endpoints que usa el bot
+  (/ping, /time, /klines, /ticker/price, /depth, /ticker/24hr). Se apunto el bot ahi.
+- Precio BTC al arrancar ~ $82,848 (Binance.US en ese momento ~ $82,800): consistente.
+- POR LO TANTO: los resultados son con PRECIOS REALES DE BINANCE, NO simulados.
+- El WebSocket (wss://stream.binance.com:9443) tambien esta bloqueado: se resetea
+  cada ~6 s. No afecta decisiones: el precio para trading se obtiene por REST
+  (main.py _update_price -> client.get_current_price).
+
+
+2. PYTHON E INSTALACION
+-----------------------
+- Python 3.11.15
+- python3 -m venv venv ; pip install -r requirements.txt -> OK, sin errores.
+- Versiones clave: pandas 3.0.6, numpy 2.4.6, scikit-learn 1.9.1,
+  python-binance 1.0.37, dash 4.4.1, dash-bootstrap-components 2.0.4,
+  plotly 7.1.0, websockets 17.1, requests 2.34.2, pytest 9.1.1
+  (lista completa en evidencias/pip_freeze.txt)
+
+.env usado (sin API keys):
+  PAPER_TRADING=true
+  USE_TESTNET=true
+  INITIAL_CAPITAL=10000
+  LOG_LEVEL=INFO
+  RESET_ON_STARTUP=false
+  SHOW_BACKTEST_DATA=false
+  BINANCE_API_KEY=
+  BINANCE_API_SECRET=
+  ANTHROPIC_API_KEY=
+  BINANCE_PUBLIC_BASE=https://data-api.binance.vision
+
+
+3. PYTEST: 10 PASAN, 2 FALLAN
+-----------------------------
+Fallan:
+  tests/test_trading_bot.py::TestMLAdaptiveStrategy::test_caution_level_calculation
+  tests/test_trading_bot.py::TestMLAdaptiveStrategy::test_learn_from_lessons
+Causa: SyntaxError: unmatched ')' en strategies/ml_adaptive.py linea 199
+       (sobra un ')' al cerrar el return Signal(...) de la rama BUY).
+Impacto: MLAdaptiveStrategy NO esta registrada en strategies/__init__.py
+         (ALL_STRATEGIES), asi que no afecta al bot en ejecucion.
+No se arreglo porque es un archivo de estrategia (regla: no tocar estrategias).
+El arreglo seria borrar ese ')' sobrante.
+Salida completa: evidencias/pytest_output.txt
+
+
+4. BACKTEST (500 dias, datos reales, python run_backtest_only.py)
+------------------------------------------------------------------
+Estrategia             CAGR    WinRate  ProfitFactor   MaxDD  Trades  Estado
+EMA5_Momentum         -1.6%    38.1%        0.87        5.3%     21   FAIL
+DualMA_Crossover       0.0%     0.0%        0.00        0.0%      0   FAIL
+Regime_RiskOnOff       3.7%    37.1%        1.29        6.4%     70   FAIL
+PriceMomentum_25       6.6%    50.0%        3.32        1.9%     10   FAIL
+Residual_MeanRev       1.5%    38.8%        1.16        5.4%    116   FAIL
+Donchian_Breakout     -3.5%    21.4%        0.58        8.3%     14   FAIL
+Blended_MomentumMR    -1.1%    32.0%        0.91        4.6%     25   FAIL
+BTC_MomentumBreakout   1.6%   100.0%  3177697028.15     0.0%      1   FAIL
+(umbrales del codigo: CAGR>=30%, WinRate>=38%, ProfitFactor>=1.2)
+
+- NINGUNA paso el 50% de CAGR, ni el 30% que usa realmente el codigo
+  (config.MIN_CAGR_THRESHOLD = 0.30).
+- Datos usados: 500 velas 1d y 3000 velas 4h de BTCUSDT.
+- DualMA_Crossover: 0 trades (SMA-250 con 500 dias deja poca ventana).
+- BTC_MomentumBreakout: profit factor absurdo por tener 1 solo trade ganador
+  (division por perdida ~0).
+- Graficas: backtest_results.html (raiz del proyecto).
+
+Diferencias entre el codigo real y el .txt de instrucciones:
+  - Umbral CAGR: 30% en codigo (no 50%).
+  - 8 estrategias en ALL_STRATEGIES: EMA5_Momentum, DualMA_Crossover,
+    Regime_RiskOnOff, PriceMomentum_25, Residual_MeanRev, Donchian_Breakout,
+    Blended_MomentumMR, BTC_MomentumBreakout. No son las 5 del .txt
+    (RSI+BB, MACD, EMA 9/21, rupturas, ML Adaptive) y ninguna es la de ML.
+  - MAX_POSITION_PCT = 35% (el .txt decia 40%).
+  - Sin fallback a datos simulados (ver seccion 1).
+
+Comportamiento al no pasar ninguna: main.py activa las 8 estrategias con
+capital repartido en partes iguales ($1,250 cada una). Es por diseno del codigo.
+
+
+5. CORRIDA EN VIVO (python main.py en segundo plano)
+----------------------------------------------------
+Inicio: 01:39:25 UTC | Fin: 01:52:13 UTC (~13 min) | PID 1176
+Log: run_demo.log (stdout+stderr), trading_bot.log (log propio)
+
+Dashboard http://localhost:8050: HTTP 200 en los 7 chequeos (cada 2 min)
+y en la verificacion final antes de detener. Tras detener: 000 (apagado).
+
+Chequeos periodicos (evidencias/monitor.txt):
+  01:39:49  vivo, 200, 1 trade, balance $10,000.00
+  01:41:49  vivo, 200, 1 trade, balance $9,999.47  (unrealized -0.20)
+  01:43:49  vivo, 200, 1 trade, balance $9,999.21  (unrealized -0.46)
+  01:45:49  vivo, 200, 1 trade, balance $9,999.21  (unrealized -0.46)
+  01:47:49  vivo, 200, 1 trade, balance $9,998.82  (unrealized -0.85)
+  01:49:49  vivo, 200, 1 trade, balance $9,999.05  (unrealized -0.62)
+  01:51:49  vivo, 200, 1 trade, balance $9,999.20  (unrealized -0.46)
+
+Trades:
+  - 1 abierto, 0 cerrados (trades.csv vacio; la posicion esta en positions.csv).
+  - EMA5_Momentum SHORT 0.00345 BTC @ $82,822.97 (01:39:34 UTC)
+    SL $86,899.06 | TP $75,568.90 | notional $286.07 | fee $0.29 | ml_conf 0.55
+    order_id PAPER_1_1790645974098
+  - Balance final: $9,999.20 (realized $0.00, unrealized -$0.46)
+
+Conteo del log:
+  ERROR/CRITICAL: 0 | Tracebacks: 0 | WARNING totales: 146
+  - 123 x "WebSocket connection lost: [Errno 104] Connection reset by peer"
+      (stream.binance.com bloqueado; no afecta, precio va por REST)
+  - 12 x "EMA5_Momentum: drawdown limit hit - pausing new entries"
+      (ver hallazgo abajo)
+  - resto: los 8 "FAIL" del backtest, "No strategy passed...", aviso de
+    servidor de desarrollo de Flask/werkzeug.
+  - 13 senales en total, todas de EMA5_Momentum (SELL conf=0.57 ml=0.55):
+    1 abrio posicion, 12 bloqueadas por el guard de drawdown.
+
+HALLAZGO - posible bug en el guard de drawdown (NO corregido, es logica de riesgo):
+  portfolio_manager.py _risk_check():
+      cap  = self._capital.get(strat_name, 0)          # capital LIBRE
+      peak = self._peak_capital.get(strat_name, cap)   # pico de capital TOTAL
+      if peak > 0 and (peak - cap) / peak > MAX_PORTFOLIO_DRAWDOWN_PCT: ...
+  _capital descuenta el nocional al abrir posicion (linea ~167:
+  self._capital[strat_name] -= notional), pero _peak_capital se inicializa con
+  el capital total (linea ~79). Resultado: 1250 - 286 = 964 libre;
+  (1250 - 964) / 1250 = 22.9% > 20% -> "drawdown" con perdida real de centavos.
+  Efecto: cualquier posicion > 20% del capital de la estrategia bloquea toda
+  entrada nueva, asi que en la practica MAX_OPEN_POSITIONS_PER_STRATEGY=2 no se
+  alcanza. Posible correccion (a evaluar): comparar el pico contra el equity
+  (libre + comprometido + PnL no realizado), no contra el capital libre.
+
+Apagado: kill -TERM <pid> -> "Signal 15 received - shutting down gracefully..."
+         -> "Shutdown complete." en 2 s.
+
+
+6. CAMBIOS AL CODIGO (el unico)
+-------------------------------
+Archivo: binance_client.py  (commit be47ca0; ver con: git show be47ca0)
+
+--- binance_client.py (original)
++++ binance_client.py
+@@ -21,6 +21,7 @@
+ import logging
++import os
+ import threading
+ import time
+ import json
+@@ -48,7 +49,9 @@
+ logger = logging.getLogger(__name__)
+
+-BINANCE_PUBLIC_BASE = "https://api.binance.com"
++# Overridable via .env (e.g. https://data-api.binance.vision, Binance's official
++# public market-data mirror) for regions where api.binance.com returns HTTP 451.
++BINANCE_PUBLIC_BASE = os.getenv("BINANCE_PUBLIC_BASE", "https://api.binance.com")
+ REQUEST_TIMEOUT = 15
+
+- Si no se define la variable, el valor por defecto es el original.
+- No toca logica de trading, estrategias ni credenciales.
+- Otro archivo modificado (no es codigo): backtest_results.html, regenerado por
+  run_backtest_only.py.
+
+Commits en la rama:
+  1314de6  Proyecto original tal cual venia en el zip (sin cambios)
+  be47ca0  Cambio minimo: BINANCE_PUBLIC_BASE configurable
+  28052cd  Evidencias: pytest, backtest y backtest_results.html
+  07a7b1a  Evidencias de la corrida en vivo (logs, export DB, monitor)
+  (+ commit de este reporte)
+
+
+7. ARCHIVOS DE EVIDENCIA (Claude-trading-bot-main/evidencias/)
+--------------------------------------------------------------
+  REPORTE_DEMO.txt            este reporte
+  LEEME.md                    indice breve de evidencias
+  run_demo.log                stdout+stderr de main.py (con colores ANSI)
+  run_demo_sin_colores.log    mismo log sin codigos de color
+  trading_bot.log             log propio del bot
+  monitor.txt                 chequeos cada 2 min (proceso, HTTP, trades, errores, balance)
+  dashboard_http.txt          ultimo codigo HTTP del dashboard antes de detener (200)
+  trades.csv                  trades cerrados (0 filas)
+  positions.csv               posiciones (1 fila, OPEN)
+  balance_history.csv         snapshots de balance (14 filas)
+  strategies.csv              estado/capital/backtest por estrategia (8 filas)
+  journal_entries.csv         diario de trades (0 filas)
+  trading_bot_snapshot.db     copia SQLite completa de la DB antes de detener
+  pytest_output.txt           salida de pytest -v
+  backtest_output.txt         salida de run_backtest_only.py
+  pip_freeze.txt              versiones instaladas
+  python_version.txt          version de Python
+  env_usado.txt               .env usado (sin keys)
+  ../backtest_results.html    curvas de equity del backtest
+
+
+8. COMO CORRERLO EN WINDOWS
+---------------------------
+  git clone -b claude/trading-bot-demo-setup-55kn2p https://github.com/Goepp-tec/Proyectos-claude
+  cd Proyectos-claude\Claude-trading-bot-main
+  py -3.11 -m venv venv
+  venv\Scripts\activate
+  pip install -r requirements.txt
+
+  Crear un archivo .env con:
+    PAPER_TRADING=true
+    USE_TESTNET=true
+    INITIAL_CAPITAL=10000
+  Agregar BINANCE_PUBLIC_BASE=https://data-api.binance.vision solo si
+  api.binance.com da HTTP 451 en tu region.
+
+  python -m pytest -q
+  python run_backtest_only.py
+  python main.py            (dashboard en http://localhost:8050; detener con Ctrl+C)
+
+  Para empezar de cero: borrar trading_bot.db o poner RESET_ON_STARTUP=true.
+
+
+9. PUNTOS ABIERTOS PARA EL ANALISIS
+-----------------------------------
+  a) Bug probable del guard de drawdown (capital libre vs pico total) -> seccion 5.
+  b) SyntaxError en strategies/ml_adaptive.py:199 (estrategia no registrada).
+  c) Ninguna estrategia pasa el backtest en los ultimos 500 dias; aun asi el bot
+     activa las 8 con $1,250 cada una (fallback por diseno). Revisar si ese
+     comportamiento es deseable.
+  d) Profit factor de BTC_MomentumBreakout (~3.2e9) indica que falta proteger la
+     division cuando no hay perdidas / hay muy pocos trades.
+  e) Documentacion desactualizada: README pide .env.example (no existe); el .txt
+     describe 5 estrategias y umbral 50% que no coinciden con el codigo.
+  f) WebSocket sin backoff efectivo: reintenta cada ~6 s indefinidamente
+     cuando esta bloqueado (ruido en logs).
+
+
+ADVERTENCIA
+-----------
+13 minutos de paper trading con 1 trade no dicen nada sobre rentabilidad, y en
+500 dias de datos reales ninguna estrategia llego al umbral. Proyecto educativo:
+no usar dinero real.
