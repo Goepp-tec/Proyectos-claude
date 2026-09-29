@@ -50,12 +50,19 @@ def test_replay_runs_both_books_offline_and_keeps_baseline_frozen(tmp_path, monk
 
     with patch("requests.get", side_effect=AssertionError("network")), \
          patch("requests.post", side_effect=AssertionError("network")):
-        res = run_replay(data, start, end, db_path=str(tmp_path / "replay.db"))
+        res = run_replay(data, start, end, db_path=str(tmp_path / "replay.db"),
+                         funds=1_000, budget=100, aggressiveness=8)
 
+    assert res["metrics"]["learn"]["equity_start"] == pytest.approx(100)       # the budget
+    for book in ("lab", "baseline"):
+        assert res["metrics"][book]["equity_start"] == pytest.approx(1_000)    # the funds
     for book in ("learn", "lab", "baseline"):
-        m = res["metrics"][book]
-        assert m["equity_start"] == pytest.approx(config.INITIAL_CAPITAL)
         assert len(res["equity"][book]) == 20 * 24
+    # the learning book never had more than the budget in open positions
+    import sqlite3
+    conn = sqlite3.connect(str(tmp_path / "replay.db"))
+    assert all(float(r[0]) <= 100 * 1.001 for r in conn.execute(
+        "SELECT entry_price*quantity FROM positions WHERE book='observe'"))
     for b in res["baselines"]:
         assert b.frozen and b.params == type(b)().params
     assert len(db.get_learning_audit()) > 0          # the tuner ran on replay time

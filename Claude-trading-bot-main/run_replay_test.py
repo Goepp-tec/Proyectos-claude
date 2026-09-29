@@ -23,6 +23,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
 import pickle
@@ -85,10 +86,12 @@ def fetch_data(replay_days: int, cache_dir: str) -> dict:
 # ─── Replay core ──────────────────────────────────────────────────────────────
 
 def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
-               learning: bool = True, progress=None, eval_interval_hours: float = None) -> dict:
+               learning: bool = True, progress=None, eval_interval_hours: float = None,
+               funds: float = None, budget: float = None, aggressiveness: int = None) -> dict:
     import main
     from adaptive_tuner import AdaptiveTuner
     from learning_engine import LearningEngine
+    from risk_engine import RiskEngine, RiskSettings
     from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES
     from strategy_evaluator import StrategyEvaluator
 
@@ -100,6 +103,12 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
     db.init_db()
     if eval_interval_hours:
         config.EVAL_INTERVAL_HOURS = eval_interval_hours
+    if funds:
+        config.INITIAL_CAPITAL = float(funds)     # lab / baseline books start with the funds
+    settings = RiskSettings(funds=config.INITIAL_CAPITAL,
+                            budget=float(budget or config.INITIAL_CAPITAL * 0.10),
+                            aggressiveness=int(aggressiveness or config.RISK_AGGRESSIVENESS))
+    settings.save()
 
     clock = {"now": start}
     iso_clock = lambda: clock["now"].isoformat()
@@ -117,7 +126,9 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
     bot.strategies, bot.baselines, bot.lab = learners, baselines, lab
     bot.book, bot.mode = LEARN_BOOK, "OBSERVE"
     bot._strat_dfs, bot._logged_candle, bot._current_price = {}, {}, 0.0
-    bot.portfolio = main.make_portfolio(None, learners, LEARN_BOOK, clock=iso_clock)
+    bot.risk = RiskEngine(LEARN_BOOK, clock=lambda: clock["now"])
+    bot.portfolio = main.make_portfolio(None, learners, LEARN_BOOK, clock=iso_clock,
+                                        capital_base=settings.budget, risk_engine=bot.risk)
     bot.baseline_portfolio = main.make_portfolio(None, baselines, "baseline", clock=iso_clock)
     bot.lab_portfolio = main.make_portfolio(None, lab, "lab", clock=iso_clock)
     bot.learning = LearningEngine({s.name: s for s in learners})
@@ -156,6 +167,7 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
         # 2. Hour closed: new 4h / 1d candles → signals at the close price
         now, price = ts + DELTA["1h"], float(row["close"])
         clock["now"], bot._current_price = now, price
+        bot._risk_housekeeping(price)          # day / kill-switch state, like the live loop
         changed = set()
         for iv, closes in close_times.items():
             n = closes.searchsorted(now, side="right")
@@ -192,20 +204,25 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
     }
     idx = hours.index + DELTA["1h"]
     metrics = {
-        "learn": _metrics(pd.Series(equity["learn"], index=idx), LEARN_BOOK),
-        "lab": _metrics(pd.Series(equity["lab"], index=idx), "lab"),
-        "baseline": _metrics(pd.Series(equity["baseline"], index=idx), "baseline"),
+        "learn": _metrics(pd.Series(equity["learn"], index=idx), LEARN_BOOK, settings.budget),
+        "lab": _metrics(pd.Series(equity["lab"], index=idx), "lab", config.INITIAL_CAPITAL),
+        "baseline": _metrics(pd.Series(equity["baseline"], index=idx), "baseline", config.INITIAL_CAPITAL),
+    }
+    risk_events = {
+        "kill_switch": db.get_meta(f"risk:{LEARN_BOOK}:kill"),
+        "blocked": {r["reason"].split("(")[0].strip(): r["n"] for r in db.get_conn().execute(
+            "SELECT reason, COUNT(*) AS n FROM signal_log WHERE book=? AND reason LIKE 'riesgo:%' "
+            "GROUP BY reason", (LEARN_BOOK,)).fetchall()},
     }
     return {
         "metrics": metrics, "equity": equity, "index": idx, "per_strategy": per_strategy,
-        "learners": learners, "baselines": baselines,
+        "learners": learners, "baselines": baselines, "settings": settings, "risk_events": risk_events,
         "btc_return": final_price / float(hours["open"].iloc[0]) - 1,
         "start": start, "end": end, "elapsed_sec": time.time() - t0,
     }
 
 
-def _metrics(eq: pd.Series, book: str) -> dict:
-    start_eq = config.INITIAL_CAPITAL
+def _metrics(eq: pd.Series, book: str, start_eq: float) -> dict:
     trades = db.get_trades(limit=10**7, book=book)
     pnls = [float(t["pnl"]) for t in trades]
     gross_win = sum(p for p in pnls if p > 0)
@@ -262,15 +279,22 @@ def build_report(res: dict, data_source: str) -> str:
     w(f"Periodo         : {res['start']:%Y-%m-%d %H:%M} -> {res['end']:%Y-%m-%d %H:%M} UTC "
       f"({(res['end'] - res['start']).days} dias)")
     w(f"Datos           : {data_source} (velas reales BTCUSDT 1h/4h/1d)")
-    w(f"Capital inicial : ${config.INITIAL_CAPITAL:,.0f} por libro (aprende y lab: 17 estrategias; "
-      f"baseline: las 8 originales)")
+    s = res["settings"]
+    from risk_engine import profile
+    p = profile(s.aggressiveness)
+    w(f"Fondos (paper)  : ${s.funds:,.0f}  (capital de LAB y BASELINE)")
+    w(f"Presupuesto     : ${s.budget:,.0f}  (capital de APRENDE)  |  agresividad {p['level']}/10: "
+      f"riesgo/operacion {p['risk_per_trade']:.2%}, max {p['max_open']} posiciones, "
+      f"limite diario {p['daily_loss']:.1%}, freno {p['max_drawdown']:.0%}, "
+      f"opera: {', '.join(p['statuses'])}")
     w(f"BTC buy & hold  : {res['btc_return']:+.2%} en el mismo periodo (referencia)")
     w(f"Evaluador       : cada {config.EVAL_INTERVAL_HOURS:g} h de tiempo simulado "
       f"(en vivo: cada 24 h); tuner cada {config.LEARNING_INTERVAL_HOURS:g} h")
     w(f"Duracion calculo: {res['elapsed_sec'] / 60:.1f} min")
     w("")
     w("APRENDE  = 8 registradas + 9 del catalogo; solo opera lo que el evaluador aprueba")
-    w("           (VIABLE, o CONDICIONAL en su tipo de mercado); parametros del tuner")
+    w("           para esta agresividad; tamano y limites del motor de riesgo sobre el")
+    w("           PRESUPUESTO; parametros del tuner. Sus % son sobre el presupuesto.")
     w("LAB      = las mismas 17 sin filtro (menos las DESCARTADAS): la evidencia en vivo")
     w("BASELINE = las 8 originales con parametros por defecto congelados, sin filtro")
     w("")
@@ -285,6 +309,15 @@ def build_report(res: dict, data_source: str) -> str:
     if B["trades"] and L["trades"] < 0.5 * B["trades"]:
         w(f"  OJO: hizo {L['trades']} trades vs {B['trades']} del baseline; buena parte de la")
         w("  diferencia viene de operar menos (el filtro evita estrategias no viables).")
+    w("")
+    ev = res["risk_events"]
+    w("MOTOR DE RIESGO (libro que aprende)")
+    kill = json.loads(ev["kill_switch"] or "null")
+    w(f"  Freno de emergencia: {'ACTIVADO el ' + kill['at'][:10] + ' - ' + kill['reason'] if kill else 'no se activo'}")
+    if ev["blocked"]:
+        w("  Entradas bloqueadas por riesgo:")
+        for reason, n in sorted(ev["blocked"].items(), key=lambda x: -x[1])[:8]:
+            w(f"    {n:>5} x {reason}")
     w("")
     w("EQUITY FINAL POR ESTRATEGIA (aprende / lab / baseline) Y CALIFICACION FINAL")
     w(f"{'Estrategia':<22}{'Aprende':>10}{'Lab':>10}{'Baseline':>10}  {'Estado':<12}{'Punt.':>6}  Motivo")
@@ -348,6 +381,9 @@ def main_cli():
     ap.add_argument("--days", type=int, default=500, help="days to replay (365-500 recommended)")
     ap.add_argument("--out", default="reports", help="output folder")
     ap.add_argument("--no-learning", action="store_true", help="disable tuner + evaluator (sanity check)")
+    ap.add_argument("--funds", type=float, default=None, help="paper funds (default INITIAL_CAPITAL)")
+    ap.add_argument("--budget", type=float, default=None, help="risk budget (default 10%% of funds)")
+    ap.add_argument("--aggressiveness", type=int, default=None, help="1..10 (default RISK_AGGRESSIVENESS)")
     ap.add_argument("--eval-interval-hours", type=float, default=168,
                     help="strategy evaluator cadence in simulated hours (live: 24; default 168 "
                          "keeps a 500-day replay around an hour)")
@@ -379,7 +415,8 @@ def main_cli():
 
     db_path = os.path.join(args.out, f"replay_{stamp}.db")
     res = run_replay(data, start, end, db_path, learning=not args.no_learning, progress=progress,
-                     eval_interval_hours=args.eval_interval_hours)
+                     eval_interval_hours=args.eval_interval_hours, funds=args.funds,
+                     budget=args.budget, aggressiveness=args.aggressiveness)
     from binance_client import BINANCE_PUBLIC_BASE
     report = build_report(res, BINANCE_PUBLIC_BASE)
     report_path = os.path.join(args.out, f"REPLAY_REPORT_{stamp}.txt")
