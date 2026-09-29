@@ -154,4 +154,4 @@ def test_dashboard_shows_the_latest_daily_report(temp_db, tmp_path):
     out = _dump(dash_app._render_daily_report())
     assert "INFORME DOS" in out and "2026-10-01" in out          # latest shown, older selectable
     assert "INFORME UNO" in _dump(dash_app.show_daily_report(str(tmp_path / "informe_diario_2026-10-01.txt")))
-    assert dash_app.render_tab_for("tab-report", "interval-refresh") is dash.no_update
+    assert dash_app.render_tab_for("tab-report", "interval-refresh", rendered="tab-report") is dash.no_update

@@ -138,6 +138,7 @@ app.layout = dbc.Container(fluid=True, style={"backgroundColor": COLORS["bg"],
     ]),
 
     html.Div(id="tab-content", style={"padding": "12px 12px 30px"}),
+    dcc.Store(id="rendered-tab", data=""),     # which tab tab-content currently shows
 ])
 
 # ─── Callbacks ────────────────────────────────────────────────────────────────
@@ -263,22 +264,36 @@ def update_kpis(_):
 
 @app.callback(
     Output("tab-content", "children"),
+    Output("rendered-tab", "data"),
     Input("main-tabs", "active_tab"),
     Input("interval-refresh", "n_intervals"),
+    State("rendered-tab", "data"),
 )
-def render_tab(active_tab, _):
+def render_tab(active_tab, _, rendered):
     ctx = dash.callback_context
     trigger = ctx.triggered_id if ctx.triggered else None
-    return render_tab_for(active_tab, trigger)
+    result = render_tab_for(active_tab, trigger, rendered)
+    return (dash.no_update, dash.no_update) if result is dash.no_update else result
 
 
-def render_tab_for(active_tab, trigger):
+# Tabs the 10 s refresh must not rebuild: the Control form (it would wipe what the
+# user is typing; its status box has its own callback) and hourly / daily data
+# with a selector (coin, day) the user would lose.
+STATIC_TABS = ("tab-control", "tab-market", "tab-report")
+
+
+def render_tab_for(active_tab, trigger, rendered=None):
+    """(content, tab drawn) or dash.no_update. A refresh only skips a static tab
+    that is already on screen: Dash keeps the newest response, so a refresh
+    racing a tab click used to answer 'no update' and leave the old tab drawn."""
+    if active_tab in STATIC_TABS and trigger == "interval-refresh" and rendered == active_tab:
+        return dash.no_update
+    return _tab_content(active_tab), active_tab
+
+
+def _tab_content(active_tab):
     if active_tab == "tab-control":
-        # A form: rebuilding it every 10 s would wipe what the user is typing.
-        # Its live status box has its own refresh callback.
-        return dash.no_update if trigger == "interval-refresh" else _render_control()
-    if active_tab in ("tab-market", "tab-report") and trigger == "interval-refresh":
-        return dash.no_update      # hourly / daily data; keeps the coin or day chosen
+        return _render_control()
     if active_tab == "tab-overview":
         return _render_overview()
     elif active_tab == "tab-strategies":

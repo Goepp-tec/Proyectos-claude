@@ -116,7 +116,7 @@ def test_control_preview_and_live_status(temp_db):
 def test_control_tab_is_not_rebuilt_by_the_auto_refresh(temp_db):
     import dash
     from dashboard import app as dash_app
-    assert dash_app.render_tab_for("tab-control", "interval-refresh") is dash.no_update
+    assert dash_app.render_tab_for("tab-control", "interval-refresh", rendered="tab-control") is dash.no_update
     assert dash_app.render_tab_for("tab-control", "main-tabs") is not dash.no_update
 
 
@@ -177,7 +177,7 @@ def test_market_tab_has_a_coin_selector_and_the_new_sources(temp_db, monkeypatch
     for text in ("OKX", "Hyperliquid", "CME"):
         assert text in eth, text
     # hourly data: the tab (and the chosen coin) is not rebuilt by the 10 s refresh
-    assert dash_app.render_tab_for("tab-market", "interval-refresh") is dash.no_update
+    assert dash_app.render_tab_for("tab-market", "interval-refresh", rendered="tab-market") is dash.no_update
 
 
 def test_strategies_tab_summarises_each_coin(temp_db):
@@ -190,3 +190,14 @@ def test_strategies_tab_summarises_each_coin(temp_db):
     assert "Por cripto" in out and "Turtle_Breakout@ETH" in out
     assert "Turtle_Breakout (0.80)" in out            # best strategy of the BTC row
     assert "Turtle System 1" in out or "Turtle" in out  # source found through the base name
+
+
+def test_a_refresh_racing_a_tab_click_still_draws_the_new_tab(temp_db):
+    """Dash keeps only the newest response: if the 10 s refresh fires right after a
+    tab click, its 'no update' used to win and the old tab stayed on screen."""
+    import dash
+    from dashboard import app as dash_app
+    for tab in ("tab-control", "tab-market", "tab-report"):
+        content, rendered = dash_app.render_tab_for(tab, "interval-refresh", rendered="tab-overview")
+        assert content is not dash.no_update and rendered == tab
+        assert dash_app.render_tab_for(tab, "interval-refresh", rendered=tab) is dash.no_update
