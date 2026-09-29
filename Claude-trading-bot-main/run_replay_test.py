@@ -38,7 +38,6 @@ import database as db
 
 DELTA = {"1h": pd.Timedelta(hours=1), "4h": pd.Timedelta(hours=4), "1d": pd.Timedelta(days=1)}
 LEARN_BOOK = "observe"   # the learning strategies' book, as in live observation mode
-TUNED_BOOK = "tuned"     # replay only: tuned params + fixed ML confidence
 
 logger = logging.getLogger("replay")
 
@@ -66,20 +65,18 @@ def intrabar_path(o: float, h: float, l: float, c: float, levels) -> list:
 def fetch_data(replay_days: int, cache_dir: str) -> dict:
     """Real Binance candles (closed only, with indicators), cached per day."""
     from binance_client import BINANCE_PUBLIC_BASE, BinancePublicDataFetcher
-    history_days = replay_days + config.LEARNING_PROPOSAL_DAYS + \
-        config.LEARNING_VALIDATION_DAYS + config.LEARNING_WARMUP_DAYS + 10
+    history_days = replay_days + max(
+        config.LEARNING_PROPOSAL_DAYS + config.LEARNING_VALIDATION_DAYS + config.LEARNING_WARMUP_DAYS,
+        config.EVAL_WINDOWS * config.EVAL_WINDOW_DAYS + config.EVAL_WARMUP_DAYS) + 10
     os.makedirs(cache_dir, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
-    path = os.path.join(cache_dir, f"klines_{config.SYMBOL}_{replay_days}d_{stamp}.pkl")
+    path = os.path.join(cache_dir, f"klines_{config.SYMBOL}_{replay_days}d_{history_days}h_{stamp}.pkl")
     if os.path.exists(path):
         with open(path, "rb") as f:
             return pickle.load(f)
     fetcher = BinancePublicDataFetcher(BINANCE_PUBLIC_BASE)
-    data = {
-        "1h": fetcher.get_klines_since(config.SYMBOL, "1h", replay_days + 2),
-        "4h": fetcher.get_klines_since(config.SYMBOL, "4h", history_days),
-        "1d": fetcher.get_klines_since(config.SYMBOL, "1d", history_days),
-    }
+    # 1h is both the replay clock and the interval of some catalog strategies
+    data = {iv: fetcher.get_klines_since(config.SYMBOL, iv, history_days) for iv in ("1h", "4h", "1d")}
     with open(path, "wb") as f:
         pickle.dump(data, f)
     return data
@@ -88,11 +85,12 @@ def fetch_data(replay_days: int, cache_dir: str) -> dict:
 # ─── Replay core ──────────────────────────────────────────────────────────────
 
 def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
-               learning: bool = True, progress=None) -> dict:
+               learning: bool = True, progress=None, eval_interval_hours: float = None) -> dict:
     import main
     from adaptive_tuner import AdaptiveTuner
     from learning_engine import LearningEngine
-    from strategies import ALL_STRATEGIES
+    from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES
+    from strategy_evaluator import StrategyEvaluator
 
     config.DB_PATH = db_path
     conn = getattr(db._local, "conn", None)
@@ -100,26 +98,29 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
         conn.close()
     db._local.conn = None
     db.init_db()
+    if eval_interval_hours:
+        config.EVAL_INTERVAL_HOURS = eval_interval_hours
 
     clock = {"now": start}
     iso_clock = lambda: clock["now"].isoformat()
 
-    learners = [S() for S in ALL_STRATEGIES]
+    # Same line-up as the live bot: registered strategies + candidate catalog.
+    learners = [S() for S in ALL_STRATEGIES + CANDIDATE_STRATEGIES]
     for s in learners:
         s.is_active = True
-    baselines = main.build_baselines({s.name for s in learners})
+    registered = {S().name for S in ALL_STRATEGIES}
+    baselines = main.build_baselines(registered)
+    lab = main.build_lab(learners)
 
     # The live TradingBot without its network client: same methods, historical clock.
     bot = main.TradingBot.__new__(main.TradingBot)
-    bot.strategies, bot.baselines = learners, baselines
+    bot.strategies, bot.baselines, bot.lab = learners, baselines, lab
     bot.book, bot.mode = LEARN_BOOK, "OBSERVE"
     bot._strat_dfs, bot._logged_candle, bot._current_price = {}, {}, 0.0
     bot.portfolio = main.make_portfolio(None, learners, LEARN_BOOK, clock=iso_clock)
     bot.baseline_portfolio = main.make_portfolio(None, baselines, "baseline", clock=iso_clock)
+    bot.lab_portfolio = main.make_portfolio(None, lab, "lab", clock=iso_clock)
     bot.learning = LearningEngine({s.name: s for s in learners})
-    # Replay-only 'tuned' book: the learners' (tuned) params with the baseline's
-    # fixed ML confidence — isolates the effect of the parameter changes.
-    tuned_pm = main.make_portfolio(None, learners, TUNED_BOOK, clock=iso_clock)
 
     def history(interval, days, now):
         df = data[interval]
@@ -127,15 +128,18 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
         return closed[closed.index >= now - pd.Timedelta(days=days)]
 
     bot.tuner = AdaptiveTuner(
-        learners={s.name: s for s in learners}, history_fn=history,
+        learners={s.name: s for s in learners if s.name in registered}, history_fn=history,
         equity_fn=bot._strategy_equity, clock=lambda: clock["now"], learner_book=LEARN_BOOK,
     )
+    bot.evaluator = StrategyEvaluator({s.name: s for s in learners}, history_fn=history,
+                                      clock=lambda: clock["now"], live_book="lab")
 
-    close_times = {iv: data[iv].index + DELTA[iv] for iv in ("4h", "1d")}
+    intervals = sorted({s.candle_interval for s in learners})
+    close_times = {iv: data[iv].index + DELTA[iv] for iv in intervals}
     last_closed = {iv: -1 for iv in close_times}
     hours = data["1h"][(data["1h"].index >= start) & (data["1h"].index < end)]
-    equity = {"learn": [], "tuned": [], "baseline": []}
-    books = (("learn", bot.portfolio, learners), ("tuned", tuned_pm, learners),
+    equity = {"learn": [], "lab": [], "baseline": []}
+    books = (("learn", bot.portfolio, learners), ("lab", bot.lab_portfolio, lab),
              ("baseline", bot.baseline_portfolio, baselines))
     t0 = time.time()
 
@@ -160,19 +164,20 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
                 bot._strat_dfs[iv] = data[iv].iloc[max(0, n - config.LOOKBACK_CANDLES):n]
                 changed.add(iv)
         if changed:
+            fixed = lambda name, df: config.BASELINE_ML_CONFIDENCE
             bot._process_signals([s for s in learners if s.candle_interval in changed],
                                  bot.portfolio, price,
-                                 lambda name, df: bot.learning.get_confidence(name, df))
-            bot._process_signals([s for s in learners if s.candle_interval in changed],
-                                 tuned_pm, price,
-                                 lambda name, df: config.BASELINE_ML_CONFIDENCE)
+                                 lambda name, df: bot.learning.get_confidence(name, df),
+                                 gate=bot._learner_gate)
             bot._process_signals([b for b in baselines if b.candle_interval in changed],
-                                 bot.baseline_portfolio, price,
-                                 lambda name, df: config.BASELINE_ML_CONFIDENCE)
+                                 bot.baseline_portfolio, price, fixed)
+            bot._process_signals([s for s in lab if s.candle_interval in changed],
+                                 bot.lab_portfolio, price, fixed, gate=bot._lab_gate)
 
-        # 3. Journal + learning, exactly as the live learning loop
+        # 3. Journal + evaluator + learning, exactly as the live learning loop
         bot._journal_new_trades()
         if learning:
+            bot.evaluator.run_cycle_if_due()
             bot.tuner.run_cycle_if_due()
 
         for label, pm, strats in books:
@@ -188,7 +193,7 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
     idx = hours.index + DELTA["1h"]
     metrics = {
         "learn": _metrics(pd.Series(equity["learn"], index=idx), LEARN_BOOK),
-        "tuned": _metrics(pd.Series(equity["tuned"], index=idx), TUNED_BOOK),
+        "lab": _metrics(pd.Series(equity["lab"], index=idx), "lab"),
         "baseline": _metrics(pd.Series(equity["baseline"], index=idx), "baseline"),
     }
     return {
@@ -239,7 +244,7 @@ def _reason_category(reason: str) -> str:
     return reason
 
 def build_report(res: dict, data_source: str) -> str:
-    L, T, B = res["metrics"]["learn"], res["metrics"]["tuned"], res["metrics"]["baseline"]
+    L, T, B = res["metrics"]["learn"], res["metrics"]["lab"], res["metrics"]["baseline"]
     audit = db.get_learning_audit(limit=10**6)
     counts = {d: sum(r["decision"] == d for r in audit) for d in ("applied", "rejected", "rollback")}
     rows = [
@@ -257,34 +262,45 @@ def build_report(res: dict, data_source: str) -> str:
     w(f"Periodo         : {res['start']:%Y-%m-%d %H:%M} -> {res['end']:%Y-%m-%d %H:%M} UTC "
       f"({(res['end'] - res['start']).days} dias)")
     w(f"Datos           : {data_source} (velas reales BTCUSDT 1h/4h/1d)")
-    w(f"Capital inicial : ${config.INITIAL_CAPITAL:,.0f} por libro, repartido en 8 estrategias")
+    w(f"Capital inicial : ${config.INITIAL_CAPITAL:,.0f} por libro (aprende y lab: 17 estrategias; "
+      f"baseline: las 8 originales)")
     w(f"BTC buy & hold  : {res['btc_return']:+.2%} en el mismo periodo (referencia)")
+    w(f"Evaluador       : cada {config.EVAL_INTERVAL_HOURS:g} h de tiempo simulado "
+      f"(en vivo: cada 24 h); tuner cada {config.LEARNING_INTERVAL_HOURS:g} h")
     w(f"Duracion calculo: {res['elapsed_sec'] / 60:.1f} min")
     w("")
-    w("APRENDE      = parametros del tuner + confianza ML adaptativa (lo que corre en vivo)")
-    w("SOLO AJUSTES = parametros del tuner + confianza fija 0.55 (aisla el efecto de los ajustes)")
-    w("BASELINE     = parametros por defecto congelados + confianza fija 0.55")
+    w("APRENDE  = 8 registradas + 9 del catalogo; solo opera lo que el evaluador aprueba")
+    w("           (VIABLE, o CONDICIONAL en su tipo de mercado); parametros del tuner")
+    w("LAB      = las mismas 17 sin filtro (menos las DESCARTADAS): la evidencia en vivo")
+    w("BASELINE = las 8 originales con parametros por defecto congelados, sin filtro")
     w("")
-    w(f"{'Metrica':<34}{'APRENDE':>15}{'SOLO AJUSTES':>15}{'BASELINE':>15}")
+    w(f"{'Metrica':<34}{'APRENDE':>15}{'LAB':>15}{'BASELINE':>15}")
     w("-" * 79)
     for label, fmt, key in rows:
         w(f"{label:<34}{fmt.format(L[key]):>15}{fmt.format(T[key]):>15}{fmt.format(B[key]):>15}")
     w("")
-    for name, M in (("Aprende", L), ("Solo ajustes", T)):
-        diff = M["equity_end"] - B["equity_end"]
-        better = diff > 0 and M["max_drawdown"] <= B["max_drawdown"] + 0.02
-        verdict = "SUPERO" if better else "NO supero"
-        w(f"{name:<13} vs baseline: equity {diff:+,.2f} USD -> {verdict} al baseline.")
-        if B["trades"] and M["trades"] < 0.5 * B["trades"]:
-            w(f"  OJO: hizo {M['trades']} trades vs {B['trades']} del baseline; la diferencia se")
-            w("  explica sobre todo por operar menos, no por operar mejor.")
+    diff = L["equity_end"] - B["equity_end"]
+    better = diff > 0 and L["max_drawdown"] <= B["max_drawdown"] + 0.02
+    w(f"Aprende vs baseline: equity {diff:+,.2f} USD -> {'SUPERO' if better else 'NO supero'} al baseline.")
+    if B["trades"] and L["trades"] < 0.5 * B["trades"]:
+        w(f"  OJO: hizo {L['trades']} trades vs {B['trades']} del baseline; buena parte de la")
+        w("  diferencia viene de operar menos (el filtro evita estrategias no viables).")
     w("")
-    w("EQUITY FINAL POR ESTRATEGIA")
-    w(f"{'Estrategia':<24}{'Aprende':>12}{'Solo ajust.':>12}{'Baseline':>12}")
+    w("EQUITY FINAL POR ESTRATEGIA (aprende / lab / baseline) Y CALIFICACION FINAL")
+    w(f"{'Estrategia':<22}{'Aprende':>10}{'Lab':>10}{'Baseline':>10}  {'Estado':<12}{'Punt.':>6}  Motivo")
+    status = {s["strategy_name"]: s for s in db.get_all_strategy_status()}
     for name, eq_l in res["per_strategy"]["learn"].items():
-        eq_t = res["per_strategy"]["tuned"][name]
-        eq_b = res["per_strategy"]["baseline"][name]
-        w(f"{name:<24}{eq_l:>12,.2f}{eq_t:>12,.2f}{eq_b:>12,.2f}")
+        eq_t = res["per_strategy"]["lab"].get(name, 0.0)
+        eq_b = res["per_strategy"]["baseline"].get(name)
+        st = status.get(name, {})
+        w(f"{name:<22}{eq_l:>10,.2f}{eq_t:>10,.2f}{(f'{eq_b:,.2f}' if eq_b is not None else '-'):>10}  "
+          f"{st.get('status', '?'):<12}{st.get('score', 0):>6.2f}  {(st.get('reason') or '')[:70]}")
+    evals = db.get_strategy_evaluations(limit=10**6)
+    w(f"Evaluaciones realizadas: {len(evals)}")
+    discarded = sorted((s for s in status.values() if s["status"] == "DESCARTADA"),
+                       key=lambda s: s["discarded_at"] or "")
+    for s in discarded:
+        w(f"  descartada el {(s['discarded_at'] or '')[:10]}: {s['strategy_name']}")
     w("")
     w(f"APRENDIZAJE: {len(audit)} propuestas -> {counts['applied']} aplicadas, "
       f"{counts['rejected']} rechazadas, {counts['rollback']} revertidas (rollback)")
@@ -316,10 +332,11 @@ def build_report(res: dict, data_source: str) -> str:
     w("- SL/TP se simulan con un recorrido intra-hora (apertura->min/max->cierre);")
     w("  el orden real dentro de la hora puede diferir. Fills simulados con")
     w(f"  slippage {config.SLIPPAGE:.2%} y fee {config.TRADING_FEE:.1%}; sin spread real ni latencia.")
-    w("- Aprende vs Solo ajustes = efecto de la confianza ML (win rate reciente y rachas:")
-    w("  ajusta el tamano y pausa entradas). Solo ajustes vs Baseline = efecto de los")
-    w("  cambios de parametros. 'Solo ajustes' comparte instancias de estrategia con")
-    w("  'Aprende' (mismos parametros en cada momento); existe solo en el replay.")
+    w("- El evaluador califica con backtests de los ~2 anos ANTERIORES a cada fecha")
+    w("  simulada (nunca con datos futuros), pero los umbrales del evaluador y el")
+    w("  catalogo se eligieron hoy: sigue habiendo riesgo de sesgo de seleccion.")
+    w("- Aprende y lab reparten el capital entre 17 estrategias y el baseline entre 8:")
+    w("  compare el equity TOTAL, no por estrategia.")
     w("- Profit factor y win rate con pocos trades no son estadisticamente fiables.")
     w("- Indicadores calculados una vez sobre toda la historia (en vivo: sobre la")
     w("  ventana de 600 velas); diferencias minimas en EMAs largas.")
@@ -330,7 +347,10 @@ def main_cli():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--days", type=int, default=500, help="days to replay (365-500 recommended)")
     ap.add_argument("--out", default="reports", help="output folder")
-    ap.add_argument("--no-learning", action="store_true", help="disable the tuner (sanity check)")
+    ap.add_argument("--no-learning", action="store_true", help="disable tuner + evaluator (sanity check)")
+    ap.add_argument("--eval-interval-hours", type=float, default=168,
+                    help="strategy evaluator cadence in simulated hours (live: 24; default 168 "
+                         "keeps a 500-day replay around an hour)")
     args = ap.parse_args()
 
     import main   # noqa: F401 — its import installs console/file log handlers; override below
@@ -358,7 +378,8 @@ def main_cli():
         print(f"  {ts:%Y-%m-%d}  {i / max(n, 1):5.1%}  ({secs / 60:.1f} min)", flush=True)
 
     db_path = os.path.join(args.out, f"replay_{stamp}.db")
-    res = run_replay(data, start, end, db_path, learning=not args.no_learning, progress=progress)
+    res = run_replay(data, start, end, db_path, learning=not args.no_learning, progress=progress,
+                     eval_interval_hours=args.eval_interval_hours)
     from binance_client import BINANCE_PUBLIC_BASE
     report = build_report(res, BINANCE_PUBLIC_BASE)
     report_path = os.path.join(args.out, f"REPLAY_REPORT_{stamp}.txt")

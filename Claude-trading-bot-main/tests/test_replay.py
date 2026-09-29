@@ -40,7 +40,8 @@ def test_replay_runs_both_books_offline_and_keeps_baseline_frozen(tmp_path, monk
     from run_replay_test import run_replay
     from strategies import ALL_STRATEGIES
     for name, value in (("LEARNING_PROPOSAL_DAYS", 30), ("LEARNING_VALIDATION_DAYS", 30),
-                        ("LEARNING_MIN_VALIDATION_TRADES", 1)):
+                        ("LEARNING_MIN_VALIDATION_TRADES", 1), ("EVAL_WINDOWS", 2),
+                        ("EVAL_WINDOW_DAYS", 20), ("EVAL_INTERVAL_HOURS", 24 * 7)):
         monkeypatch.setattr(config, name, value)
     monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "replay.db"))   # restored after test
     data = _synthetic()
@@ -51,7 +52,7 @@ def test_replay_runs_both_books_offline_and_keeps_baseline_frozen(tmp_path, monk
          patch("requests.post", side_effect=AssertionError("network")):
         res = run_replay(data, start, end, db_path=str(tmp_path / "replay.db"))
 
-    for book in ("learn", "tuned", "baseline"):
+    for book in ("learn", "lab", "baseline"):
         m = res["metrics"][book]
         assert m["equity_start"] == pytest.approx(config.INITIAL_CAPITAL)
         assert len(res["equity"][book]) == 20 * 24
@@ -59,3 +60,14 @@ def test_replay_runs_both_books_offline_and_keeps_baseline_frozen(tmp_path, monk
         assert b.frozen and b.params == type(b)().params
     assert len(db.get_learning_audit()) > 0          # the tuner ran on replay time
     assert all(r["ts"] < end.isoformat() for r in db.get_learning_audit())
+    from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES
+    rated = db.get_all_strategy_status()             # the evaluator ran on replay time
+    assert len(rated) == len(ALL_STRATEGIES) + len(CANDIDATE_STRATEGIES)
+    assert all(e["ts"] < end.isoformat() for e in db.get_strategy_evaluations(limit=10**6))
+    # the learning book never opened a position the evaluator did not allow
+    blocked = [s for s in db.get_signals(book="observe", limit=10**6) if s["reason"].startswith("evaluator")]
+    opened = [s for s in db.get_signals(book="observe", limit=10**6) if s["acted"]]
+    assert blocked or not opened
+    from run_replay_test import build_report
+    report = build_report(res, "sintetico")
+    assert "LAB" in report and "CALIFICACION FINAL" in report
