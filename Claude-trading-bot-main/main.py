@@ -38,10 +38,11 @@ from backtester import run_all_backtests
 from portfolio_manager import PortfolioManager
 from learning_engine import LearningEngine
 from adaptive_tuner import AdaptiveTuner
-from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES
+from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES, build_line_up
 from strategy_evaluator import StrategyEvaluator
 from risk_engine import RiskEngine, RiskSettings, profile as risk_profile
 from market_data import MarketDataCollector, enrich as enrich_market_data
+from utils import price_of, symbol_of
 
 # ─── Logging setup ────────────────────────────────────────────────────────────
 # Console handler with colors (if available)
@@ -146,21 +147,32 @@ def build_lab(learners):
     lab = []
     for s in learners:
         copy = type(s)()
+        copy.name, copy.symbol = s.name, symbol_of(s)
         copy.params = s.params
         copy.is_active = True
         lab.append(copy)
     return lab
 
 
-def build_baselines(active_names):
-    """Frozen default-param copy of every strategy; active if its learner is active."""
+def build_baselines(active_names, symbols=None):
+    """Frozen default-param copy of every registered strategy on every symbol;
+    active if its learner is active."""
     baselines = []
-    for S in ALL_STRATEGIES:
-        b = S()
+    for b in build_line_up(ALL_STRATEGIES, symbols or config.SYMBOLS):
         b.is_active = b.name in active_names
         b.freeze()
         baselines.append(b)
     return baselines
+
+
+def book_capital(symbols=None) -> float:
+    """
+    Capital of the lab and baseline books: INITIAL_CAPITAL per symbol, so each
+    strategy instance keeps the same share it had with one symbol (1000 USD over
+    25 strategies x 5 coins would leave 8 USD each, below Binance's minimum).
+    Their returns are compared in %, never in dollars.
+    """
+    return config.INITIAL_CAPITAL * len(symbols or config.SYMBOLS)
 
 
 # ─── Shutdown flag ────────────────────────────────────────────────────────────
@@ -180,9 +192,11 @@ class TradingBot:
         db.init_db()
         logger.info("Database initialised")
         self.client     = BinanceClient()
-        # Registered strategies + the candidate catalog; the strategy evaluator
-        # decides which of them may trade in the learning book, and when.
-        self.strategies = [S() for S in ALL_STRATEGIES + CANDIDATE_STRATEGIES]
+        # Every symbol runs its own copy of every strategy: registered ones + the
+        # candidate catalog; the strategy evaluator decides which of them may
+        # trade in the learning book, and when (per symbol).
+        self.symbols    = list(config.SYMBOLS)
+        self.strategies = build_line_up(ALL_STRATEGIES + CANDIDATE_STRATEGIES, self.symbols)
         self.portfolio:  PortfolioManager = None
         self.learning:   LearningEngine   = None
         self.book = "main"      # book the (learning) strategies trade in
@@ -196,10 +210,11 @@ class TradingBot:
         self.evaluator: StrategyEvaluator = None
         self.risk: RiskEngine = None   # budget / aggressiveness for the learning book
         # Free positioning / funding / Fear & Greed data, joined to every candle
-        self.market = MarketDataCollector(config.SYMBOL)
-        self._strat_dfs: Dict[str, object] = {}
+        self.market = MarketDataCollector(self.symbols)
+        self._strat_dfs: Dict[tuple, object] = {}     # (symbol, interval) -> candles
         self._logged_candle: Dict[str, str] = {}
-        self._current_price: float = 0.0
+        self._prices: Dict[str, float] = {}           # symbol -> latest price
+        self._current_price: float = 0.0              # primary symbol (BTC)
         self._price_lock = threading.Lock()
 
     # ─── Startup ──────────────────────────────────────────────────────────────
@@ -209,18 +224,20 @@ class TradingBot:
         logger.info("   BTC PAPER TRADING BOT  —  Starting up")
         logger.info(f"   Mode      : {'PAPER TRADING (real Binance data)' if self.client.is_paper_trading else 'LIVE TRADING ⚠️'}")
         logger.info(f"   Capital   : ${config.INITIAL_CAPITAL:,.2f}")
-        logger.info(f"   Symbol    : {config.SYMBOL}")
+        logger.info(f"   Symbols   : {', '.join(self.symbols)}")
         logger.info(f"   Backtest  : {config.BACKTEST_DAYS} days of real OHLCV data")
         logger.info("=" * 65)
 
-        # Fetch live price
-        self._current_price = self.client.get_current_price(config.SYMBOL)
+        # Fetch live prices
+        self._update_price()
         stats = self.client.get_24hr_stats(config.SYMBOL)
         change_pct = float(stats.get("priceChangePercent", 0))
         logger.info(
             f"Live BTC price: ${self._current_price:,.2f} "
             f"({change_pct:+.2f}% 24h | vol: {float(stats.get('volume', 0)):,.0f} BTC)"
         )
+        for sym in self.symbols[1:]:
+            logger.info(f"Live {sym} price: ${self._prices.get(sym, 0):,.4f}")
 
         # Warm up candle cache
         logger.info("\nLoading candle data…")
@@ -287,7 +304,7 @@ class TradingBot:
                 "→ trading ALL strategies (unvalidated)."
             )
         logger.info(f"\nMode {self.mode}: {len(active)}/{len(self.strategies)} strategies "
-                    f"in book '{self.book}'\n")
+                    f"({len(self.symbols)} symbols) in book '{self.book}'\n")
 
         # Init portfolio + learning. The learning book trades the risk budget,
         # sized and limited by the risk engine (aggressiveness 1-10).
@@ -306,13 +323,14 @@ class TradingBot:
         self.learning = LearningEngine(strat_dict)
 
         # Frozen baselines trade the same signals with default params, own capital
-        self.baselines = build_baselines(active_names)
-        self.baseline_portfolio = make_portfolio(self.client, self.baselines, "baseline")
+        self.baselines = build_baselines(active_names, self.symbols)
+        self.baseline_portfolio = make_portfolio(self.client, self.baselines, "baseline",
+                                                 capital_base=book_capital(self.symbols))
         # Parameter tuning is compared against baselines, so it only covers the
         # registered strategies (candidates are rated by the evaluator instead).
         registered = {S().name for S in ALL_STRATEGIES}
         self.tuner = AdaptiveTuner(
-            learners={n: s for n, s in strat_dict.items() if n in registered},
+            learners={n: s for n, s in strat_dict.items() if s.base_name in registered},
             history_fn=self._learning_history,
             equity_fn=self._strategy_equity,
             clock=lambda: datetime.now(timezone.utc),
@@ -320,7 +338,8 @@ class TradingBot:
         )
         # Lab copies trade everything not discarded: live evidence for the evaluator
         self.lab = build_lab(self.strategies)
-        self.lab_portfolio = make_portfolio(self.client, self.lab, "lab")
+        self.lab_portfolio = make_portfolio(self.client, self.lab, "lab",
+                                            capital_base=book_capital(self.symbols))
         self.evaluator = StrategyEvaluator(
             strat_dict, history_fn=self._learning_history,
             clock=lambda: datetime.now(timezone.utc), live_book="lab",
@@ -340,7 +359,7 @@ class TradingBot:
         self.learning.seed_from_trades(db.get_trades(limit=5000, book=self.book))
 
         # Initial balance snapshot
-        bal = self.portfolio.total_balance(self._current_price)
+        bal = self.portfolio.total_balance(self.prices())
         db.record_balance(
             total_balance=bal["total_balance"],
             realized_pnl=bal["realized_pnl"],
@@ -382,7 +401,7 @@ class TradingBot:
             try:
                 self._update_price()
                 self._refresh_candles()
-                price = self._current_price
+                price = self.prices()
 
                 self._process_signals(self.strategies, self.portfolio, price,
                                       lambda name, df: self.learning.get_confidence(name, df),
@@ -406,9 +425,10 @@ class TradingBot:
         ok, why = self.evaluator.can_trade(strat, signal.type, df, statuses)
         return None if ok else why
 
-    def _risk_housekeeping(self, price: float):
-        """Apply dashboard risk changes and refresh the day / kill-switch state."""
-        if self.risk is None or self.portfolio is None or price <= 0:
+    def _risk_housekeeping(self, price):
+        """Apply dashboard risk changes and refresh the day / kill-switch state.
+        price: {symbol: price} (or one float with a single symbol)."""
+        if self.risk is None or self.portfolio is None or not price:
             return
         settings = RiskSettings.load()
         if self.portfolio.capital_base != settings.budget:
@@ -431,13 +451,17 @@ class TradingBot:
             return "evaluator: DESCARTADA (valor 0)"
         return None
 
-    def _process_signals(self, strategies, portfolio, price, ml_conf_fn, gate=None):
+    def _process_signals(self, strategies, portfolio, prices, ml_conf_fn, gate=None):
+        """Each strategy reads its own symbol's candles and trades at its price."""
         book = portfolio.book
         for strat in strategies:
             if not strat.is_active:
                 continue
-            interval = strat.candle_interval
-            df = self._strat_dfs.get(interval)
+            interval, symbol = strat.candle_interval, symbol_of(strat)
+            price = price_of(prices, symbol)
+            if price <= 0:
+                continue
+            df = self._strat_dfs.get((symbol, interval))
             if df is None or len(df) < strat.min_candles:
                 logger.debug(
                     f"[{book}:{strat.name}] Insufficient data "
@@ -473,8 +497,8 @@ class TradingBot:
         logger.info("[positions] Loop started")
         while not _shutdown.is_set():
             try:
-                price = self._current_price
-                if price > 0 and self.portfolio:
+                price = self.prices()
+                if price and self.portfolio:
                     self.portfolio.check_open_positions(price)
                     self.baseline_portfolio.check_open_positions(price)
                     self.lab_portfolio.check_open_positions(price)
@@ -516,8 +540,10 @@ class TradingBot:
         new_trades = sorted((t for t in db.get_trades(limit=100_000, book=self.book)
                              if t["id"] > last_id), key=lambda t: t["id"])
         for trade in new_trades:
-            interval  = self._get_strat_interval(trade["strategy_name"])
-            df_latest = self._strat_dfs.get(interval)
+            strat     = self._get_strat(trade["strategy_name"])
+            interval  = strat.candle_interval if strat else "1h"
+            symbol    = symbol_of(strat) if strat else (trade.get("symbol") or config.SYMBOL)
+            df_latest = self._strat_dfs.get((symbol, interval))
             self.learning.on_trade_closed(
                 trade_id=trade["id"],
                 strategy_name=trade["strategy_name"],
@@ -540,8 +566,8 @@ class TradingBot:
         logger.info("[balance] Loop started")
         while not _shutdown.is_set():
             try:
-                price = self._current_price
-                if price > 0 and self.portfolio:
+                price = self.prices()
+                if price and self.portfolio:
                     bal = self.portfolio.total_balance(price)
                     db.record_balance(
                         total_balance=bal["total_balance"],
@@ -581,41 +607,55 @@ class TradingBot:
     # ─── Helpers ─────────────────────────────────────────────────────────────
 
     def _update_price(self):
-        try:
-            price = self.client.get_current_price(config.SYMBOL)
-            if price > 0:
-                with self._price_lock:
-                    self._current_price = price
-        except Exception as e:
-            logger.warning(f"Price update failed: {e}")
+        """Latest price of every symbol; one failing symbol keeps its last price."""
+        lock = getattr(self, "_price_lock", None) or threading.Lock()
+        for sym in getattr(self, "symbols", None) or [config.SYMBOL]:
+            try:
+                price = self.client.get_current_price(sym)
+                if price > 0:
+                    with lock:
+                        self._prices[sym] = price
+                        if sym == config.SYMBOL:
+                            self._current_price = price
+            except Exception as e:
+                logger.warning(f"Price update failed for {sym}: {e}")
+
+    def prices(self) -> Dict[str, float]:
+        """{symbol: latest price}; bots built before several symbols fall back to BTC."""
+        prices = getattr(self, "_prices", None)
+        if prices:
+            return dict(prices)
+        btc = getattr(self, "_current_price", 0.0)
+        return {config.SYMBOL: btc} if btc else {}
 
     def _refresh_candles(self):
-        """Refresh OHLCV data for each unique strategy interval."""
-        intervals = set(s.candle_interval for s in self.strategies if s.is_active)
-        for interval in intervals:
+        """Refresh OHLCV data for each (symbol, interval) an active strategy uses."""
+        pairs = {(symbol_of(s), s.candle_interval) for s in self.strategies if s.is_active}
+        for symbol, interval in sorted(pairs):
             try:
                 df = self.client.get_latest_candles(
-                    config.SYMBOL, interval, limit=config.LOOKBACK_CANDLES
+                    symbol, interval, limit=config.LOOKBACK_CANDLES
                 )
                 if df is not None and not df.empty:
-                    self._strat_dfs[interval] = enrich_market_data(df, config.SYMBOL, interval)
-                    logger.debug(f"Refreshed {interval} candles: {len(df)} rows")
+                    self._strat_dfs[(symbol, interval)] = enrich_market_data(df, symbol, interval)
+                    logger.debug(f"Refreshed {symbol} {interval} candles: {len(df)} rows")
             except Exception as e:
-                logger.error(f"[candles] Error refreshing {interval}: {e}")
+                logger.error(f"[candles] Error refreshing {symbol} {interval}: {e}")
 
     def _strategy_equity(self, book: str, name: str) -> float:
         pm = self.baseline_portfolio if book == "baseline" else self.portfolio
-        return pm.strategy_equity(name, self._current_price)
+        return pm.strategy_equity(name, self.prices())
 
-    def _learning_history(self, interval: str, days: int, end: datetime):
-        df = self.client.get_historical_klines(config.SYMBOL, interval, days)
-        return enrich_market_data(df[df.index < end], config.SYMBOL, interval)
+    def _learning_history(self, interval: str, days: int, end: datetime, symbol: str = None):
+        symbol = symbol or config.SYMBOL
+        df = self.client.get_historical_klines(symbol, interval, days)
+        return enrich_market_data(df[df.index < end], symbol, interval)
 
-    def _get_strat_interval(self, name: str) -> str:
+    def _get_strat(self, name: str):
         for s in self.strategies:
             if s.name == name:
-                return s.candle_interval
-        return "1h"
+                return s
+        return None
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

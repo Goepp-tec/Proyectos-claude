@@ -152,3 +152,22 @@ def test_finish_writes_report_and_is_final(run):
     from scripts.run_7day_test import TestRun
     assert TestRun(name="t", duration_hours=168, snapshot_minutes=60,
                    out_dir=run.out_dir).start_or_resume(end + timedelta(hours=1)) == "finished"
+
+
+def test_snapshot_values_each_symbol_at_its_own_price(run):
+    """With several coins a position must not be valued at BTC's price."""
+    eth = Mock()
+    eth.name, eth.symbol, eth.is_active = "A@ETH", "ETHUSDT", True
+    pm = PortfolioManager(Mock(), [eth], book="observe", simulate_fills=True)
+    prices = {"BTCUSDT": 50_000.0, "ETHUSDT": 2_000.0}
+    bot = SimpleNamespace(book="observe", strategies=[eth], baselines=[], _current_price=50_000.0,
+                          prices=lambda: dict(prices), portfolio=pm,
+                          baseline_portfolio=PortfolioManager(Mock(), [], book="baseline",
+                                                              simulate_fills=True))
+    run.start_or_resume(T0)
+    pm.process_signal(eth, _buy(2_000.0), 2_000.0, 0.6)
+    pos = db.get_open_positions("A@ETH", book="observe")[0]
+    prices["ETHUSDT"] = 2_100.0
+    run.snapshot(T0, bot)
+    row = next(r for r in run.snapshots() if r["strategy_name"] == "A@ETH")
+    assert row["unrealized_pnl"] == pytest.approx((2_100.0 - pos["entry_price"]) * pos["quantity"])

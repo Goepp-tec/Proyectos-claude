@@ -21,6 +21,7 @@ import pandas as pd
 
 import config
 from strategies.base_strategy import BaseStrategy, Signal, SignalType
+from utils import symbol_of
 
 logger = logging.getLogger(__name__)
 
@@ -342,21 +343,21 @@ def run_all_backtests(strategies: List[BaseStrategy],
     results = {}
     logger.info(f"Running backtests for {len(strategies)} strategies over {config.BACKTEST_DAYS} days...")
 
-    cache: Dict[str, pd.DataFrame] = {}   # avoid re-fetching same interval
+    cache: Dict[tuple, pd.DataFrame] = {}   # avoid re-fetching the same symbol + interval
 
     for strat in strategies:
-        interval = strat.candle_interval
-        if interval not in cache:
-            logger.info(f"Fetching {config.BACKTEST_DAYS}-day history ({interval})...")
+        interval, symbol = strat.candle_interval, symbol_of(strat)
+        if (symbol, interval) not in cache:
+            logger.info(f"Fetching {config.BACKTEST_DAYS}-day history ({symbol} {interval})...")
             df = client.get_historical_klines(
-                config.SYMBOL, interval, config.BACKTEST_DAYS
+                symbol, interval, config.BACKTEST_DAYS
             )
             if df.empty:
-                logger.error(f"No data for interval {interval}. Skipping.")
+                logger.error(f"No data for {symbol} {interval}. Skipping.")
                 continue
-            cache[interval] = df
+            cache[(symbol, interval)] = df
 
-        df = cache[interval]
+        df = cache[(symbol, interval)]
         bt = Backtester(strat, df)
         result = bt.run()
         results[strat.name] = result

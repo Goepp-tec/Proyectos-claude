@@ -52,6 +52,7 @@ import pandas as pd
 
 import config
 import database as db
+from utils import coin_of
 
 logger = logging.getLogger(__name__)
 
@@ -94,11 +95,6 @@ def _default_http(url: str, params: dict = None, body: dict = None):
         r = requests.post(url, json=body, timeout=30)
     r.raise_for_status()
     return r.json()
-
-
-def coin_of(symbol: str) -> str:
-    """BTCUSDT -> BTC"""
-    return symbol[:-4] if symbol.endswith("USDT") else symbol
 
 
 def _iso_ms(ms) -> str:

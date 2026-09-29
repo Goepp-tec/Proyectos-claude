@@ -27,7 +27,7 @@ class Toy(BaseStrategy):
         return Signal(SignalType.HOLD, 0.0)
 
 
-def _history(interval, days, end):
+def _history(interval, days, end, symbol=None):
     idx = pd.date_range(end=end, periods=days, freq="1D", tz="UTC")
     n = len(idx)
     close = np.linspace(100, 200, n)

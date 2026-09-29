@@ -31,7 +31,7 @@ def test_live_candles_carry_the_market_data_columns(temp_db):
     bot = _bot()
     bot.market.update(force=True)
     bot._refresh_candles()
-    df = bot._strat_dfs["1h"]
+    df = bot._strat_dfs[(config.SYMBOL, "1h")]
     for m in METRICS:
         assert m in df.columns
     assert df["top_pos_ratio"].notna().any()

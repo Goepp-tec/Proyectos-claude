@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
 import database as db
+from utils import price_of
 
 logger = logging.getLogger("test_run")
 
@@ -146,7 +147,9 @@ class TestRun:
         return last is None or now - _parse(last) >= self.snapshot_every
 
     def snapshot(self, now: datetime, bot):
-        price = bot._current_price
+        price = bot._current_price     # primary symbol, for the 'price' column
+        # every position is valued at its own symbol's price
+        prices = bot.prices() if hasattr(bot, "prices") else {config.SYMBOL: price}
         since = _iso(self.start)
         audit = [r for r in db.get_learning_audit(limit=10**6) if r["ts"] >= since]
         learning = {d: sum(r["decision"] == d for r in audit) for d in ("applied", "rejected", "rollback")}
@@ -161,11 +164,12 @@ class TestRun:
             totals = dict(equity=0.0, free=0.0, open=0, closed=0, realized=0.0, unreal=0.0, base=0.0)
             for s in active:
                 positions = db.get_open_positions(s.name, book=book)
-                unreal = sum(((price - p["entry_price"]) if p["side"] == "LONG"
-                              else (p["entry_price"] - price)) * p["quantity"] for p in positions)
+                unreal = sum(((px - p["entry_price"]) if p["side"] == "LONG"
+                              else (p["entry_price"] - px)) * p["quantity"]
+                             for p in positions for px in [price_of(prices, p["symbol"])] if px > 0)
                 trades = [t for t in db.get_trades(s.name, limit=10**6, book=book)
                           if (t["closed_at"] or "") >= since]
-                row = dict(equity=pm.strategy_equity(s.name, price), free=pm._capital.get(s.name, 0.0),
+                row = dict(equity=pm.strategy_equity(s.name, prices), free=pm._capital.get(s.name, 0.0),
                            open=len(positions), closed=len(trades),
                            realized=sum(t["pnl"] for t in trades), unreal=unreal,
                            base=base / max(len(active), 1))
@@ -283,7 +287,8 @@ class TestRun:
         label, checks = verdict(L, B)
         out = []
         w = out.append
-        w(f"REPORTE PRUEBA '{self.name}' — PAPER TRADING BTCUSDT (demo, sin dinero real)")
+        w(f"REPORTE PRUEBA '{self.name}' — PAPER TRADING {', '.join(config.SYMBOLS)} "
+          f"(demo, sin dinero real)")
         w("=" * 74)
         w(f"Inicio  : {self.start:%Y-%m-%d %H:%M} UTC")
         w(f"Fin     : {now:%Y-%m-%d %H:%M} UTC (planificado {self.end:%Y-%m-%d %H:%M})")
@@ -309,7 +314,8 @@ class TestRun:
             w(f"Aprende - lab (equity final):      ${L['equity_end'] - X['equity_end']:+,.2f}")
             w("  Comparacion justa del evaluador = APRENDE vs LAB: mismas estrategias,")
             w("  mismo capital por estrategia; la unica diferencia es el filtro. El baseline")
-            w("  reparte el capital entre 8 estrategias (posiciones ~2x mas grandes).")
+            w("  reparte el capital entre las 8 originales (posiciones mas grandes).")
+            w("  Aprende opera el PRESUPUESTO; lab y baseline los fondos por cripto: comparar %.")
         w("")
         final = {}
         for r in self.snapshots():
@@ -317,9 +323,9 @@ class TestRun:
                 final[(r["book"], r["strategy_name"])] = r["equity"]
         names = sorted({n for _, n in final})
         if names:
-            w(f"{'Estrategia':<24}{'Aprende':>12}{'Baseline':>12}")
+            w(f"{'Estrategia':<28}{'Aprende':>12}{'Baseline':>12}")
             for n in names:
-                w(f"{n:<24}{final.get((learn_book, n), 0):>12,.2f}{final.get(('baseline', n), 0):>12,.2f}")
+                w(f"{n:<28}{final.get((learn_book, n), 0):>12,.2f}{final.get(('baseline', n), 0):>12,.2f}")
             w("")
         since = _iso(self.start)
         audit = [r for r in db.get_learning_audit(limit=10**6) if r["ts"] >= since]
@@ -335,7 +341,7 @@ class TestRun:
         if statuses:
             w("Evaluador de estrategias (calificacion actual):")
             for s in statuses:
-                w(f"  {s['strategy_name']:<22} {s['status']:<12} puntaje {s['score']:.2f}  "
+                w(f"  {s['strategy_name']:<28} {s['status']:<12} puntaje {s['score']:.2f}  "
                   f"{(s['reason'] or '')[:80]}")
             changes = [e for e in db.get_strategy_evaluations(limit=10**6) if e["ts"] >= since]
             last = {}

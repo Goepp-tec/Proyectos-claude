@@ -26,7 +26,18 @@ PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() == "true"
 ALLOW_UNVALIDATED_STRATEGIES = os.getenv("ALLOW_UNVALIDATED_STRATEGIES", "false").lower() == "true"
 
 # ─── Trading Parameters ────────────────────────────────────────────────────────
-SYMBOL             = "BTCUSDT"
+SYMBOL             = "BTCUSDT"   # primary symbol: its strategies keep their plain names
+
+
+def parse_symbols() -> list:
+    """SYMBOLS=BTCUSDT,ETHUSDT,... (default: SYMBOL only). The primary symbol
+    goes first; every other one runs its own copy of every strategy."""
+    raw = [s.strip().upper() for s in os.getenv("SYMBOLS", "").split(",") if s.strip()]
+    rest = [s for i, s in enumerate(raw) if s != SYMBOL and s not in raw[:i]]
+    return [SYMBOL] + rest
+
+
+SYMBOLS            = parse_symbols()
 INITIAL_CAPITAL    = float(os.getenv("INITIAL_CAPITAL", "10000"))
 MAX_STRATEGIES     = 7
 CANDLE_INTERVAL    = "1h"

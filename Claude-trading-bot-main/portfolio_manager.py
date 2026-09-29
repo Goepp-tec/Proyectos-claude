@@ -8,6 +8,11 @@ Each strategy receives an equal share of total capital.
 If a strategy's drawdown exceeds MAX_PORTFOLIO_DRAWDOWN_PCT its allocation
 is frozen (no new entries) until it recovers.
 
+Several symbols: each strategy instance trades one symbol (strategy.symbol);
+orders, positions and trades carry it, and every price argument named
+`prices` is {symbol: price} (a single float still works for one symbol).
+A position is valued, and its SL/TP checked, only at its own symbol's price.
+
 Changes:
   - Replaced deprecated datetime.utcnow() with utils.utc_now()
 """
@@ -21,7 +26,7 @@ import config
 import database as db
 from binance_client import BinanceClient
 from strategies.base_strategy import BaseStrategy, Signal, SignalType
-from utils import utc_now, utc_now_iso
+from utils import coin_of, price_of, symbol_of, utc_now, utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +65,13 @@ class PortfolioManager:
         # In-memory capital state (persisted to DB periodically)
         self._capital: Dict[str, float] = {}
         self._peak_capital: Dict[str, float] = {}
+        self._last_prices: Dict[str, float] = {}   # latest price seen per symbol
 
         self._allocate_capital()
 
     # ─── Capital allocation ───────────────────────────────────────────────────
 
-    def _allocate_capital(self, current_price: float = 0.0):
+    def _allocate_capital(self, prices=0.0):
         """
         Split initial capital equally among active strategies.
         Includes realized P&L from closed trades and unrealized P&L from open positions.
@@ -89,6 +95,7 @@ class PortfolioManager:
                 ep = float(p["entry_price"])
                 qty = float(p["quantity"])
                 committed += ep * qty
+                current_price = price_of(prices, p["symbol"])
                 if current_price > 0:
                     if p["side"] == "LONG":
                         unrealized += (current_price - ep) * qty
@@ -114,32 +121,48 @@ class PortfolioManager:
                 f"(${total_cap:,.2f} total, ${committed:,.2f} committed)"
             )
 
-    def reallocate(self, current_price: float = 0.0):
+    def reallocate(self, prices=0.0):
         """Re-balance capital from strategies that are inactive or over-limit."""
-        self._allocate_capital(current_price)
+        self._allocate_capital(prices)
 
-    def set_capital_base(self, capital_base: float, current_price: float = 0.0):
+    def set_capital_base(self, capital_base: float, prices=0.0):
         """Budget changed (dashboard): re-split it; realized/unrealized P&L is kept."""
         with self._lock:
             self.capital_base = capital_base
-            self._allocate_capital(current_price)
+            self._allocate_capital(prices)
 
-    def close_all_positions(self, current_price: float, reason: str = "MANUAL_CLOSE_ALL") -> int:
-        """Close every open position of this book at the current price."""
+    def close_all_positions(self, prices, reason: str = "MANUAL_CLOSE_ALL") -> int:
+        """Close every open position of this book at its symbol's current price."""
+        self._remember(prices)
         positions = [p for p in db.get_open_positions(book=self.book)
                      if p["strategy_name"] in self.strategies]
+        closed = 0
         for pos in positions:
-            self._close_position(pos, current_price, reason)
-        return len(positions)
+            price = price_of(prices, pos["symbol"])
+            if price > 0:
+                self._close_position(pos, price, reason)
+                closed += 1
+        return closed
+
+    # ─── Prices ──────────────────────────────────────────────────────────────
+
+    def _remember(self, prices):
+        if isinstance(prices, dict):
+            self._last_prices.update({k: float(v) for k, v in prices.items() if v})
+
+    def known_prices(self) -> Dict[str, float]:
+        """Latest price seen for every symbol (the risk engine values the whole book)."""
+        return dict(self._last_prices)
 
     def _sync_capital_row(self, strat_name: str, capital: float):
         # The strategies table (dashboard) describes the main book only.
         if self.book == "main":
             db.update_strategy_capital(strat_name, capital)
 
-    def _place_order(self, side: str, quantity: float, current_price: float) -> Optional[dict]:
+    def _place_order(self, side: str, quantity: float, current_price: float,
+                     symbol: str = None) -> Optional[dict]:
         if not self.simulate_fills:
-            return self.client.place_market_order(config.SYMBOL, side, quantity)
+            return self.client.place_market_order(symbol or config.SYMBOL, side, quantity)
         fill = current_price * (1 + config.SLIPPAGE if side == "BUY" else 1 - config.SLIPPAGE)
         return {"orderId": f"SIM_{self.book}", "fills": [{"price": fill, "qty": quantity}]}
 
@@ -166,6 +189,8 @@ class PortfolioManager:
 
         with self._lock:
             strat_name = strategy.name
+            if current_price > 0:
+                self._last_prices[symbol_of(strategy)] = float(current_price)
 
             if candle_ts is not None:
                 key = f"last_signal_candle:{self.book}:{strat_name}"
@@ -222,8 +247,9 @@ class PortfolioManager:
             return False, "zero_size"
 
         # ── Place order ───────────────────────────────────────────────────
+        symbol = symbol_of(strategy)
         side = "BUY" if signal.type == SignalType.BUY else "SELL"
-        order = self._place_order(side, quantity, current_price)
+        order = self._place_order(side, quantity, current_price, symbol)
         if order is None:
             logger.error(f"{strat_name}: order placement failed")
             return False, "order_failed"
@@ -242,7 +268,7 @@ class PortfolioManager:
 
         pos_id = db.open_position(
             strategy_name=strat_name,
-            symbol=config.SYMBOL,
+            symbol=symbol,
             side="LONG" if side == "BUY" else "SHORT",
             entry_price=fill_price,
             quantity=quantity,
@@ -260,21 +286,25 @@ class PortfolioManager:
         self._sync_capital_row(strat_name, self._capital[strat_name])
 
         logger.info(
-            f"[{self.book}:{strat_name}] OPEN {side} {quantity:.5f} BTC @ ${fill_price:,.2f} "
+            f"[{self.book}:{strat_name}] OPEN {side} {quantity:.5f} {coin_of(symbol)} @ ${fill_price:,.2f} "
             f"| SL=${sl:,.2f} TP=${tp:,.2f} | notional=${notional:,.2f}"
         )
         return True, "opened"
 
     # ─── Position monitoring ──────────────────────────────────────────────────
 
-    def check_open_positions(self, current_price: float):
+    def check_open_positions(self, prices):
         """
-        Check all open positions against current price.
-        Close any that have hit SL or TP.
+        Check all open positions against their symbol's current price.
+        Close any that have hit SL or TP; a symbol without a price is skipped.
         """
+        self._remember(prices)
         positions = [p for p in db.get_open_positions(book=self.book)
                      if p["strategy_name"] in self.strategies]
         for pos in positions:
+            current_price = price_of(prices, pos["symbol"])
+            if current_price <= 0:
+                continue
             hit, reason = self._check_sl_tp(pos, current_price)
             if hit:
                 self._close_position(pos, current_price, reason)
@@ -302,13 +332,14 @@ class PortfolioManager:
 
     def _close_position(self, pos: dict, current_price: float, reason: str):
         strat_name = pos["strategy_name"]
+        symbol = pos.get("symbol") or config.SYMBOL
         side  = pos["side"]
         qty   = float(pos["quantity"])
         entry = float(pos["entry_price"])
 
         # Place exit order
         exit_side = "SELL" if side == "LONG" else "BUY"
-        order = self._place_order(exit_side, qty, current_price)
+        order = self._place_order(exit_side, qty, current_price, symbol)
         if order is None:
             logger.error(f"Could not close position {pos['id']} for {strat_name}")
             return
@@ -337,7 +368,7 @@ class PortfolioManager:
         entry_features = pos.get("metadata", {})
         trade_id = db.record_trade(
             strategy_name=strat_name,
-            symbol=config.SYMBOL,
+            symbol=symbol,
             side=side,
             entry_price=entry,
             exit_price=exit_price,
@@ -371,7 +402,7 @@ class PortfolioManager:
                 strat.record_trade_outcome(net_pnl > 0)
 
         logger.info(
-            f"[{self.book}:{strat_name}] CLOSE {side} {qty:.5f} BTC @ ${exit_price:,.2f} "
+            f"[{self.book}:{strat_name}] CLOSE {side} {qty:.5f} {coin_of(symbol)} @ ${exit_price:,.2f} "
             f"| PnL ${net_pnl:+.2f} ({pnl_pct*100:+.2f}%) | {reason}"
         )
 
@@ -379,12 +410,13 @@ class PortfolioManager:
 
     # ─── Risk checks ──────────────────────────────────────────────────────────
 
-    def strategy_equity(self, strat_name: str, current_price: float) -> float:
+    def strategy_equity(self, strat_name: str, prices) -> float:
         """Free capital + notional committed in open positions + unrealized PnL."""
         equity = self._capital.get(strat_name, 0.0)
         for p in db.get_open_positions(strat_name, book=self.book):
             ep, qty = float(p["entry_price"]), float(p["quantity"])
             equity += ep * qty
+            current_price = price_of(prices, p["symbol"])
             if current_price > 0:
                 equity += (current_price - ep) * qty if p["side"] == "LONG" \
                     else (ep - current_price) * qty
@@ -440,7 +472,7 @@ class PortfolioManager:
 
     # ─── Account state ────────────────────────────────────────────────────────
 
-    def total_balance(self, current_price: float) -> dict:
+    def total_balance(self, prices) -> dict:
         """Return a dict with total balance, realized and unrealized PnL."""
         realized_sum = 0.0
         unrealized   = 0.0
@@ -462,6 +494,9 @@ class PortfolioManager:
                 ep  = float(p["entry_price"])
                 qty = float(p["quantity"])
                 committed_notional += ep * qty  # notional locked in position
+                current_price = price_of(prices, p["symbol"])
+                if current_price <= 0:
+                    continue
                 if p["side"] == "LONG":
                     unreal += (current_price - ep) * qty
                 else:
@@ -480,7 +515,7 @@ class PortfolioManager:
                 "unrealized_pnl": unreal,
                 "open_positions": len(open_pos),
                 "committed_notional": committed_notional,
-                "current_price": current_price,
+                "current_price": price_of(prices, symbol_of(strat)),
             }
 
         # Total balance = sum of all strategy totals (which includes free capital + committed + unrealized)

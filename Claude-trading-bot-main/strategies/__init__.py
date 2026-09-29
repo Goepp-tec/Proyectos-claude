@@ -1,3 +1,5 @@
+import config
+from utils import coin_of
 from .base_strategy import BaseStrategy, Signal, SignalType
 from .ema5_momentum import EMA5MomentumStrategy
 from .dual_ma_crossover import DualMACrossoverStrategy
@@ -53,3 +55,22 @@ CANDIDATE_STRATEGIES = [
     HLTopWalletsFollowStrategy,     # follow Hyperliquid's most profitable wallets
     COTInstitutionalStrategy,       # Larry Williams' COT index on CME asset managers
 ]
+
+
+def for_symbol(strategy_cls, symbol: str) -> BaseStrategy:
+    """
+    One instance of a strategy for one symbol. On the primary symbol (BTCUSDT)
+    it keeps its plain name, so ratings, learned params and trades recorded
+    before several symbols existed still apply; on the others it becomes
+    'Name@COIN' (e.g. 'EMA5_Momentum@ETH'), rated and tuned on its own.
+    """
+    s = strategy_cls()
+    s.symbol = symbol
+    if symbol != config.SYMBOL:
+        s.name = f"{s.name}@{coin_of(symbol)}"
+    return s
+
+
+def build_line_up(strategy_classes, symbols) -> list:
+    """Every strategy on every symbol (primary symbol first)."""
+    return [for_symbol(S, sym) for sym in symbols for S in strategy_classes]

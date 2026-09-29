@@ -55,8 +55,11 @@ class BaseStrategy(ABC):
     SOURCE: str = ""   # where a catalog strategy comes from (book, author, public setup)
 
     def __init__(self, name: str, params: Dict[str, Any]):
+        import config
         self.name = name
         self.params = dict(params)
+        # Symbol this instance trades; strategies.for_symbol() makes one per coin
+        self.symbol: str = config.SYMBOL
         self.capital: float = 0.0
         self.is_active: bool = False
         self.frozen: bool = False   # frozen = baseline copy, params never change
@@ -124,12 +127,23 @@ class BaseStrategy(ABC):
                 self.set_tunable_param(name, value)
 
     def clone(self, params: Optional[Dict[str, Any]] = None) -> "BaseStrategy":
-        """Fresh instance of the same strategy with these params (never frozen)."""
+        """Fresh instance of the same strategy, symbol and name with these params (never frozen)."""
         other = type(self)()
+        other.name, other.symbol = self.name, self.symbol
         other.params = dict(self.params)
         if params:
             other.params.update(params)
         return other
+
+    @property
+    def base_name(self) -> str:
+        """Strategy name without the coin suffix ('EMA5_Momentum@ETH' -> 'EMA5_Momentum')."""
+        return self.name.split("@")[0]
+
+    @property
+    def coin(self) -> str:
+        from utils import coin_of
+        return coin_of(self.symbol)
 
     def set_capital(self, capital: float):
         self.capital = capital

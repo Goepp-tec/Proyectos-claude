@@ -31,6 +31,7 @@ from typing import Callable, Optional, Tuple
 import config
 import database as db
 from strategies.base_strategy import SignalType
+from utils import symbol_of
 
 MODES = ("trade", "close_only")
 _LOW = dict(risk_per_trade=0.0025, max_position=0.10, max_open=2, max_exposure=0.30,
@@ -111,15 +112,16 @@ class RiskEngine:
 
     # ─── State ───────────────────────────────────────────────────────────────
 
-    def status(self, pm, price: float) -> dict:
+    def status(self, pm, prices) -> dict:
         """Current risk state of the book; updates the day reference, the P&L
-        high-water mark and the kill switch."""
+        high-water mark and the kill switch. prices: {symbol: price} (every
+        position is valued at its own symbol's price) or one float."""
         s = RiskSettings.load()
         prof = profile(s.aggressiveness)
         base = pm.capital_base if pm.capital_base is not None else s.budget
         positions = db.get_open_positions(book=self.book)
         exposure = sum(float(p["entry_price"]) * float(p["quantity"]) for p in positions)
-        equity = sum(pm.strategy_equity(n, price) for n in pm.strategies)
+        equity = sum(pm.strategy_equity(n, prices) for n in pm.strategies)
         pnl = equity - base
 
         today = self.clock().date().isoformat()
@@ -166,8 +168,11 @@ class RiskEngine:
     # ─── Entry check + position size ─────────────────────────────────────────
 
     def check_entry(self, strategy, signal, price: float, ml_confidence: float, pm) -> Tuple[bool, str, float]:
-        """(allowed, reason, notional_usd) for a new position of this book."""
-        st = self.status(pm, price)
+        """(allowed, reason, notional_usd) for a new position of this book.
+        `price` is the entry symbol's price; the rest of the book is valued at
+        the latest price the portfolio saw for each of its symbols."""
+        prices = {**pm.known_prices(), symbol_of(strategy): price}
+        st = self.status(pm, prices)
         s, prof = RiskSettings(**st["settings"]), st["profile"]
         if s.mode == "close_only":
             return False, "riesgo: modo solo cierre", 0.0

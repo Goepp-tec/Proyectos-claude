@@ -35,6 +35,7 @@ import config
 import database as db
 from backtester import Backtester
 from strategies.base_strategy import BaseStrategy
+from utils import symbol_of
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ def _parse(s: str) -> datetime:
 class AdaptiveTuner:
 
     def __init__(self, learners: Dict[str, BaseStrategy],
-                 history_fn: Callable[[str, int, datetime], pd.DataFrame],
+                 history_fn: Callable[[str, int, datetime, str], pd.DataFrame],
                  equity_fn: Callable[[str, str], float],
                  clock: Callable[[], datetime],
                  learner_book: str = "main",
@@ -85,7 +86,7 @@ class AdaptiveTuner:
                  evaluate_fn: Callable[[BaseStrategy, pd.DataFrame, str], Metrics] = backtest_window):
         """
         learners     : name -> learning strategy instance (params are modified in place)
-        history_fn   : (interval, days, end) -> closed OHLCV candles up to `end`
+        history_fn   : (interval, days, end, symbol) -> closed OHLCV candles up to `end`
         equity_fn    : (book, strategy_name) -> current equity incl. unrealized PnL
         clock        : current UTC time (the replay injects historical time)
         """
@@ -96,7 +97,7 @@ class AdaptiveTuner:
         self.learner_book = learner_book
         self.baseline_book = baseline_book
         self.evaluate_fn = evaluate_fn
-        self._history_cache: Dict[str, pd.DataFrame] = {}
+        self._history_cache: Dict[tuple, pd.DataFrame] = {}
 
     # ─── Persistence ─────────────────────────────────────────────────────────
 
@@ -162,7 +163,7 @@ class AdaptiveTuner:
 
         val_start = now - timedelta(days=config.LEARNING_VALIDATION_DAYS)
         prop_start = val_start - timedelta(days=config.LEARNING_PROPOSAL_DAYS)
-        df = self._history(strat.candle_interval, now)
+        df = self._history(symbol_of(strat), strat.candle_interval, now)
         prop_win = self._window(df, strat, prop_start, val_start)
         val_win = self._window(df, strat, val_start, now)
         base = dict(ts=_iso(now), strategy_name=name, param=param, old_value=current,
@@ -269,12 +270,12 @@ class AdaptiveTuner:
         db.set_meta(key, str(idx + 1))
         return names[idx]
 
-    def _history(self, interval: str, now: datetime) -> pd.DataFrame:
-        if interval not in self._history_cache:
+    def _history(self, symbol: str, interval: str, now: datetime) -> pd.DataFrame:
+        if (symbol, interval) not in self._history_cache:     # each symbol tunes on its own candles
             days = (config.LEARNING_PROPOSAL_DAYS + config.LEARNING_VALIDATION_DAYS
                     + config.LEARNING_WARMUP_DAYS)
-            self._history_cache[interval] = self.history_fn(interval, days, now)
-        return self._history_cache[interval]
+            self._history_cache[(symbol, interval)] = self.history_fn(interval, days, now, symbol)
+        return self._history_cache[(symbol, interval)]
 
     @staticmethod
     def _window(df: pd.DataFrame, strat: BaseStrategy, start: datetime,

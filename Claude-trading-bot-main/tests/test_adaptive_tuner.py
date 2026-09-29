@@ -31,7 +31,7 @@ class ToyStrategy(BaseStrategy):
         return Signal(SignalType.HOLD, 0.0)
 
 
-def _history(interval, days, end):
+def _history(interval, days, end, symbol=None):
     idx = pd.date_range(end=end, periods=days, freq="1D", tz="UTC")
     return pd.DataFrame({"close": np.linspace(100, 200, len(idx))}, index=idx)
 
@@ -164,7 +164,7 @@ def test_validation_window_starts_after_proposal_window_with_exact_warmup():
 
 def test_millisecond_candle_index_with_microsecond_clock():
     """Binance candles are datetime64[ms]; the live clock has microseconds."""
-    def history_ms(interval, days, end):
+    def history_ms(interval, days, end, symbol=None):
         return _history(interval, days, end).set_axis(
             _history(interval, days, end).index.as_unit("ms"))
 
@@ -182,7 +182,7 @@ def test_real_backtester_cycle_on_synthetic_prices_stays_in_bounds():
     from strategies.ema5_momentum import EMA5MomentumStrategy
     rng = np.random.default_rng(7)
 
-    def history(interval, days, end):
+    def history(interval, days, end, symbol=None):
         idx = pd.date_range(end=end, periods=days, freq="1D", tz="UTC")
         close = 30_000 * np.exp(np.cumsum(rng.normal(0, 0.03, len(idx))))
         df = pd.DataFrame({"open": close, "high": close * 1.02, "low": close * 0.98,

@@ -37,6 +37,7 @@ import config
 import database as db
 from backtester import Backtester
 from strategies.base_strategy import BaseStrategy, SignalType
+from utils import symbol_of
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ def classify(m: dict) -> dict:
 class StrategyEvaluator:
 
     def __init__(self, strategies: Dict[str, BaseStrategy],
-                 history_fn: Callable[[str, int, datetime], pd.DataFrame],
+                 history_fn: Callable[[str, int, datetime, str], pd.DataFrame],
                  clock: Callable[[], datetime],
                  live_book: str = "lab",
                  backtest_fn: Callable = default_backtest):
@@ -172,11 +173,11 @@ class StrategyEvaluator:
                 logger.error(f"[Evaluator] {strat.name}: {e}", exc_info=True)
 
     def evaluate(self, strat: BaseStrategy, now: datetime) -> dict:
-        interval = strat.candle_interval
-        if interval not in self._cache:
+        interval, symbol = strat.candle_interval, symbol_of(strat)
+        if (symbol, interval) not in self._cache:     # each symbol is rated on its own candles
             days = config.EVAL_WINDOWS * config.EVAL_WINDOW_DAYS + config.EVAL_WARMUP_DAYS
-            self._cache[interval] = self.history_fn(interval, days, now)
-        df = self._cache[interval]
+            self._cache[(symbol, interval)] = self.history_fn(interval, days, now, symbol)
+        df = self._cache[(symbol, interval)]
         regimes = regime_series(df) if len(df) else pd.Series(dtype=object)
 
         all_trades, window_pnls, worst_dd = [], [], 0.0

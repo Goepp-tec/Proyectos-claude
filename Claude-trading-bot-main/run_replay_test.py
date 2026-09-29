@@ -13,13 +13,17 @@ LearningEngine, AdaptiveTuner) with the clock set to historical time.
     1h close price — the live loop does the same within a minute.
   • The tuner runs on replay time with only candles closed before "now".
 
-Both books start with INITIAL_CAPITAL split over all 8 strategies and use
-simulated fills (price ± SLIPPAGE, fee 0.1%) — like the live 'observe' and
-'baseline' books. This is a replay/backtest, NOT live evidence.
+Several symbols (--symbols BTCUSDT,ETHUSDT,...): every strategy runs on
+every symbol, each on its own candles and prices, all on the same hourly
+clock (the primary symbol's). The learning book shares one risk budget; lab
+and baseline get INITIAL_CAPITAL per symbol (see main.book_capital).
+
+Lab and baseline use simulated fills (price ± SLIPPAGE, fee 0.1%) — like the
+live 'observe' and 'baseline' books. This is a replay/backtest, NOT live evidence.
 
 Usage:
-    python run_replay_test.py              # 500 days
-    python run_replay_test.py --days 365
+    python run_replay_test.py              # 500 days, SYMBOLS from .env
+    python run_replay_test.py --days 365 --symbols BTCUSDT,ETHUSDT
 """
 
 import argparse
@@ -63,24 +67,27 @@ def intrabar_path(o: float, h: float, l: float, c: float, levels) -> list:
 
 # ─── Data ─────────────────────────────────────────────────────────────────────
 
-def fetch_data(replay_days: int, cache_dir: str) -> dict:
-    """Real Binance candles (closed only, with indicators), cached per day."""
+def fetch_data(replay_days: int, cache_dir: str, symbols=None) -> dict:
+    """Real Binance candles {symbol: {interval: df}} (closed only), cached per day."""
     from binance_client import BINANCE_PUBLIC_BASE, BinancePublicDataFetcher
     history_days = replay_days + max(
         config.LEARNING_PROPOSAL_DAYS + config.LEARNING_VALIDATION_DAYS + config.LEARNING_WARMUP_DAYS,
         config.EVAL_WINDOWS * config.EVAL_WINDOW_DAYS + config.EVAL_WARMUP_DAYS) + 10
     os.makedirs(cache_dir, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
-    path = os.path.join(cache_dir, f"klines_{config.SYMBOL}_{replay_days}d_{history_days}h_{stamp}.pkl")
-    if os.path.exists(path):
-        with open(path, "rb") as f:
-            return pickle.load(f)
     fetcher = BinancePublicDataFetcher(BINANCE_PUBLIC_BASE)
-    # 1h is both the replay clock and the interval of some catalog strategies
-    data = {iv: fetcher.get_klines_since(config.SYMBOL, iv, history_days) for iv in ("1h", "4h", "1d")}
-    with open(path, "wb") as f:
-        pickle.dump(data, f)
-    return data
+    out = {}
+    for symbol in symbols or config.SYMBOLS:
+        path = os.path.join(cache_dir, f"klines_{symbol}_{replay_days}d_{history_days}h_{stamp}.pkl")
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                out[symbol] = pickle.load(f)
+            continue
+        # 1h is both the replay clock and the interval of some catalog strategies
+        out[symbol] = {iv: fetcher.get_klines_since(symbol, iv, history_days) for iv in ("1h", "4h", "1d")}
+        with open(path, "wb") as f:
+            pickle.dump(out[symbol], f)
+    return out
 
 
 # ─── Replay core ──────────────────────────────────────────────────────────────
@@ -94,8 +101,15 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
     from learning_engine import LearningEngine
     from market_data import MarketDataCollector, enrich
     from risk_engine import RiskEngine, RiskSettings
-    from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES
+    from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES, build_line_up
     from strategy_evaluator import StrategyEvaluator
+    from utils import symbol_of
+
+    # {interval: df} (one symbol) or {symbol: {interval: df}}; primary symbol first
+    if "1h" in data:
+        data = {config.SYMBOL: data}
+    symbols = sorted(data, key=lambda sym: (sym != config.SYMBOL, list(data).index(sym)))
+    primary = symbols[0]
 
     config.DB_PATH = db_path
     conn = getattr(db._local, "conn", None)
@@ -116,84 +130,102 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
     # futures ratios only the last 30 days), joined to every candle as of its
     # close time — strategies never see a value published after the candle.
     if collect_market:
-        MarketDataCollector(config.SYMBOL).update(force=True)
-    data = {iv: enrich(df, config.SYMBOL, iv) for iv, df in data.items()}
+        MarketDataCollector(symbols).update(force=True)
+    data = {sym: {iv: enrich(df, sym, iv) for iv, df in ivs.items()} for sym, ivs in data.items()}
 
     clock = {"now": start}
     iso_clock = lambda: clock["now"].isoformat()
 
-    # Same line-up as the live bot: registered strategies + candidate catalog.
-    learners = [S() for S in ALL_STRATEGIES + CANDIDATE_STRATEGIES]
+    # Same line-up as the live bot: registered strategies + candidate catalog, per symbol.
+    learners = build_line_up(ALL_STRATEGIES + CANDIDATE_STRATEGIES, symbols)
     for s in learners:
         s.is_active = True
     registered = {S().name for S in ALL_STRATEGIES}
-    baselines = main.build_baselines(registered)
+    baselines = main.build_baselines({s.name for s in learners if s.base_name in registered}, symbols)
     lab = main.build_lab(learners)
+    book_capital = main.book_capital(symbols)
 
     # The live TradingBot without its network client: same methods, historical clock.
     bot = main.TradingBot.__new__(main.TradingBot)
     bot.strategies, bot.baselines, bot.lab = learners, baselines, lab
+    bot.symbols = symbols
     bot.book, bot.mode = LEARN_BOOK, "OBSERVE"
-    bot._strat_dfs, bot._logged_candle, bot._current_price = {}, {}, 0.0
+    bot._strat_dfs, bot._logged_candle, bot._current_price, bot._prices = {}, {}, 0.0, {}
     bot.risk = RiskEngine(LEARN_BOOK, clock=lambda: clock["now"])
     bot.portfolio = main.make_portfolio(None, learners, LEARN_BOOK, clock=iso_clock,
                                         capital_base=settings.budget, risk_engine=bot.risk)
-    bot.baseline_portfolio = main.make_portfolio(None, baselines, "baseline", clock=iso_clock)
-    bot.lab_portfolio = main.make_portfolio(None, lab, "lab", clock=iso_clock)
+    bot.baseline_portfolio = main.make_portfolio(None, baselines, "baseline", clock=iso_clock,
+                                                 capital_base=book_capital)
+    bot.lab_portfolio = main.make_portfolio(None, lab, "lab", clock=iso_clock, capital_base=book_capital)
     bot.learning = LearningEngine({s.name: s for s in learners})
 
-    def history(interval, days, now):
-        df = data[interval]
+    def history(interval, days, now, symbol=None):
+        df = data[symbol or primary][interval]
         closed = df.iloc[:(df.index + DELTA[interval]).searchsorted(now, side="right")]
         return closed[closed.index >= now - pd.Timedelta(days=days)]
 
     bot.tuner = AdaptiveTuner(
-        learners={s.name: s for s in learners if s.name in registered}, history_fn=history,
+        learners={s.name: s for s in learners if s.base_name in registered}, history_fn=history,
         equity_fn=bot._strategy_equity, clock=lambda: clock["now"], learner_book=LEARN_BOOK,
     )
     bot.evaluator = StrategyEvaluator({s.name: s for s in learners}, history_fn=history,
                                       clock=lambda: clock["now"], live_book="lab")
 
-    intervals = sorted({s.candle_interval for s in learners})
-    close_times = {iv: data[iv].index + DELTA[iv] for iv in intervals}
-    last_closed = {iv: -1 for iv in close_times}
-    hours = data["1h"][(data["1h"].index >= start) & (data["1h"].index < end)]
+    pairs = sorted({(symbol_of(s), s.candle_interval) for s in learners})
+    close_times = {(sym, iv): data[sym][iv].index + DELTA[iv] for sym, iv in pairs}
+    last_closed = {k: -1 for k in close_times}
+    hours = data[primary]["1h"][(data[primary]["1h"].index >= start) & (data[primary]["1h"].index < end)]
+    # every symbol on the primary's hourly clock (a missing hour = no price that hour)
+    bars = {sym: data[sym]["1h"].reindex(hours.index)[["open", "high", "low", "close"]].to_numpy()
+            for sym in symbols}
+    first_open = {sym: next((float(r[0]) for r in bars[sym] if not np.isnan(r[0])), float("nan"))
+                  for sym in symbols}
+    last_price = {}
     equity = {"learn": [], "lab": [], "baseline": []}
     books = (("learn", bot.portfolio, learners), ("lab", bot.lab_portfolio, lab),
              ("baseline", bot.baseline_portfolio, baselines))
     t0 = time.time()
 
-    for i, (ts, row) in enumerate(hours.iterrows()):
-        # 1. SL/TP inside the hour
+    for i, ts in enumerate(hours.index):
+        # 1. SL/TP inside the hour, each symbol along its own intra-hour path
         clock["now"] = ts + pd.Timedelta(minutes=30)
-        levels = [lvl for p in db.get_open_positions(book=None)
-                  for lvl in (p["stop_loss"], p["take_profit"]) if lvl]
-        for price in intrabar_path(row["open"], row["high"], row["low"], row["close"], levels):
-            bot._current_price = price
-            for _, pm, _ in books:
-                pm.check_open_positions(price)
+        open_positions = db.get_open_positions(book=None)
+        for sym in symbols:
+            o, h, l, c = bars[sym][i]
+            if np.isnan(c):
+                continue
+            levels = [lvl for p in open_positions if p["symbol"] == sym
+                      for lvl in (p["stop_loss"], p["take_profit"]) if lvl]
+            if not levels:
+                continue
+            for price in intrabar_path(o, h, l, c, levels):
+                if sym == primary:
+                    bot._current_price = price
+                for _, pm, _ in books:
+                    pm.check_open_positions({sym: price})
 
-        # 2. Hour closed: new 4h / 1d candles → signals at the close price
-        now, price = ts + DELTA["1h"], float(row["close"])
-        clock["now"], bot._current_price = now, price
-        bot._risk_housekeeping(price)          # day / kill-switch state, like the live loop
+        # 2. Hour closed: new 4h / 1d candles → signals at the close prices
+        now = ts + DELTA["1h"]
+        last_price.update({sym: float(bars[sym][i][3]) for sym in symbols if not np.isnan(bars[sym][i][3])})
+        prices = dict(last_price)
+        clock["now"], bot._current_price, bot._prices = now, prices.get(primary, 0.0), prices
+        bot._risk_housekeeping(prices)         # day / kill-switch state, like the live loop
         changed = set()
-        for iv, closes in close_times.items():
+        for key, closes in close_times.items():
             n = closes.searchsorted(now, side="right")
-            if n != last_closed[iv]:
-                last_closed[iv] = n
-                bot._strat_dfs[iv] = data[iv].iloc[max(0, n - config.LOOKBACK_CANDLES):n]
-                changed.add(iv)
+            if n != last_closed[key]:
+                last_closed[key] = n
+                sym, iv = key
+                bot._strat_dfs[key] = data[sym][iv].iloc[max(0, n - config.LOOKBACK_CANDLES):n]
+                changed.add(key)
         if changed:
             fixed = lambda name, df: config.BASELINE_ML_CONFIDENCE
-            bot._process_signals([s for s in learners if s.candle_interval in changed],
-                                 bot.portfolio, price,
+            due = lambda strats: [s for s in strats if (symbol_of(s), s.candle_interval) in changed]
+            bot._process_signals(due(learners), bot.portfolio, prices,
                                  lambda name, df: bot.learning.get_confidence(name, df),
                                  gate=bot._learner_gate)
-            bot._process_signals([b for b in baselines if b.candle_interval in changed],
-                                 bot.baseline_portfolio, price, fixed)
-            bot._process_signals([s for s in lab if s.candle_interval in changed],
-                                 bot.lab_portfolio, price, fixed, gate=bot._lab_gate)
+            bot._process_signals(due(baselines), bot.baseline_portfolio, prices, fixed)
+            bot._process_signals(due(lab), bot.lab_portfolio, prices, fixed, gate=bot._lab_gate)
 
         # 3. Journal + evaluator + learning, exactly as the live learning loop
         bot._journal_new_trades()
@@ -202,21 +234,23 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
             bot.tuner.run_cycle_if_due()
 
         for label, pm, strats in books:
-            equity[label].append(sum(pm.strategy_equity(s.name, price) for s in strats))
+            equity[label].append(sum(pm.strategy_equity(s.name, prices) for s in strats))
         if progress and i % (24 * 30) == 0:
             progress(ts, i, len(hours), time.time() - t0)
 
-    final_price = float(hours["close"].iloc[-1])
+    final_prices = dict(last_price)
     per_strategy = {
-        label: {s.name: pm.strategy_equity(s.name, final_price) for s in strats}
+        label: {s.name: pm.strategy_equity(s.name, final_prices) for s in strats}
         for label, pm, strats in books
     }
     idx = hours.index + DELTA["1h"]
     metrics = {
         "learn": _metrics(pd.Series(equity["learn"], index=idx), LEARN_BOOK, settings.budget),
-        "lab": _metrics(pd.Series(equity["lab"], index=idx), "lab", config.INITIAL_CAPITAL),
-        "baseline": _metrics(pd.Series(equity["baseline"], index=idx), "baseline", config.INITIAL_CAPITAL),
+        "lab": _metrics(pd.Series(equity["lab"], index=idx), "lab", book_capital),
+        "baseline": _metrics(pd.Series(equity["baseline"], index=idx), "baseline", book_capital),
     }
+    buy_hold = {sym: final_prices[sym] / first_open[sym] - 1 for sym in symbols
+                if sym in final_prices and first_open[sym] > 0}
     risk_events = {
         "kill_switch": db.get_meta(f"risk:{LEARN_BOOK}:kill"),
         "blocked": {r["reason"].split("(")[0].strip(): r["n"] for r in db.get_conn().execute(
@@ -226,7 +260,9 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
     return {
         "metrics": metrics, "equity": equity, "index": idx, "per_strategy": per_strategy,
         "learners": learners, "baselines": baselines, "settings": settings, "risk_events": risk_events,
-        "btc_return": final_price / float(hours["open"].iloc[0]) - 1,
+        "btc_return": buy_hold.get(primary, float("nan")),
+        "buy_hold": buy_hold, "basket_return": float(np.mean(list(buy_hold.values()))),
+        "symbols": symbols, "book_capital": book_capital,
         "start": start, "end": end, "elapsed_sec": time.time() - t0,
     }
 
@@ -287,24 +323,30 @@ def build_report(res: dict, data_source: str) -> str:
     w(f"Generado        : {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC")
     w(f"Periodo         : {res['start']:%Y-%m-%d %H:%M} -> {res['end']:%Y-%m-%d %H:%M} UTC "
       f"({(res['end'] - res['start']).days} dias)")
-    w(f"Datos           : {data_source} (velas reales BTCUSDT 1h/4h/1d)")
+    syms = res.get("symbols", [config.SYMBOL])
+    w(f"Datos           : {data_source} (velas reales {', '.join(syms)} 1h/4h/1d)")
     s = res["settings"]
     from risk_engine import profile
     p = profile(s.aggressiveness)
-    w(f"Fondos (paper)  : ${s.funds:,.0f}  (capital de LAB y BASELINE)")
+    w(f"Fondos (paper)  : ${s.funds:,.0f}" + (f" x {len(syms)} criptos = ${res['book_capital']:,.0f}"
+                                               if len(syms) > 1 else "") + "  (capital de LAB y BASELINE)")
     w(f"Presupuesto     : ${s.budget:,.0f}  (capital de APRENDE)  |  agresividad {p['level']}/10: "
       f"riesgo/operacion {p['risk_per_trade']:.2%}, max {p['max_open']} posiciones, "
       f"limite diario {p['daily_loss']:.1%}, freno {p['max_drawdown']:.0%}, "
       f"opera: {', '.join(p['statuses'])}")
     w(f"BTC buy & hold  : {res['btc_return']:+.2%} en el mismo periodo (referencia)")
+    if len(syms) > 1:
+        w(f"Canasta b&h     : {res['basket_return']:+.2%} (mismo peso en cada cripto: "
+          + ", ".join(f"{sym[:-4]} {r:+.1%}" for sym, r in res["buy_hold"].items()) + ")")
     w(f"Evaluador       : cada {config.EVAL_INTERVAL_HOURS:g} h de tiempo simulado "
       f"(en vivo: cada 24 h); tuner cada {config.LEARNING_INTERVAL_HOURS:g} h")
     w(f"Duracion calculo: {res['elapsed_sec'] / 60:.1f} min")
     w("")
-    w("APRENDE  = 8 registradas + 9 del catalogo; solo opera lo que el evaluador aprueba")
-    w("           para esta agresividad; tamano y limites del motor de riesgo sobre el")
-    w("           PRESUPUESTO; parametros del tuner. Sus % son sobre el presupuesto.")
-    w("LAB      = las mismas 17 sin filtro (menos las DESCARTADAS): la evidencia en vivo")
+    n_all = len(res["learners"]) // max(len(syms), 1)
+    w(f"APRENDE  = {n_all} estrategias x {len(syms)} cripto(s); solo opera lo que el evaluador")
+    w("           aprueba para esta agresividad; tamano y limites del motor de riesgo sobre")
+    w("           el PRESUPUESTO (uno solo para todas las criptos). Sus % son sobre el presupuesto.")
+    w("LAB      = las mismas sin filtro (menos las DESCARTADAS): la evidencia en vivo")
     w("BASELINE = las 8 originales con parametros por defecto congelados, sin filtro")
     w("")
     w(f"{'Metrica':<34}{'APRENDE':>15}{'LAB':>15}{'BASELINE':>15}")
@@ -323,6 +365,19 @@ def build_report(res: dict, data_source: str) -> str:
         w(f"  OJO: hizo {L['trades']} trades vs {B['trades']} del baseline; buena parte de la")
         w("  diferencia viene de operar menos (el filtro evita estrategias no viables).")
     w("")
+    if len(syms) > 1:
+        w("RESULTADO POR CRIPTO (P&L de trades cerrados, USD)")
+        w(f"{'Cripto':<10}{'Aprende':>12}{'Lab':>12}{'Baseline':>12}{'Trades aprende':>16}")
+        by_sym = {}
+        for book, label in ((LEARN_BOOK, "learn"), ("lab", "lab"), ("baseline", "baseline")):
+            for t in db.get_trades(limit=10**7, book=book):
+                d = by_sym.setdefault(t["symbol"], {"learn": 0.0, "lab": 0.0, "baseline": 0.0, "n": 0})
+                d[label] += float(t["pnl"])
+                d["n"] += label == "learn"
+        for sym in syms:
+            d = by_sym.get(sym, {"learn": 0.0, "lab": 0.0, "baseline": 0.0, "n": 0})
+            w(f"{sym[:-4]:<10}{d['learn']:>12,.2f}{d['lab']:>12,.2f}{d['baseline']:>12,.2f}{d['n']:>16d}")
+        w("")
     ev = res["risk_events"]
     w("MOTOR DE RIESGO (libro que aprende)")
     kill = json.loads(ev["kill_switch"] or "null")
@@ -333,13 +388,13 @@ def build_report(res: dict, data_source: str) -> str:
             w(f"    {n:>5} x {reason}")
     w("")
     w("EQUITY FINAL POR ESTRATEGIA (aprende / lab / baseline) Y CALIFICACION FINAL")
-    w(f"{'Estrategia':<22}{'Aprende':>10}{'Lab':>10}{'Baseline':>10}  {'Estado':<12}{'Punt.':>6}  Motivo")
+    w(f"{'Estrategia':<28}{'Aprende':>10}{'Lab':>10}{'Baseline':>10}  {'Estado':<12}{'Punt.':>6}  Motivo")
     status = {s["strategy_name"]: s for s in db.get_all_strategy_status()}
     for name, eq_l in res["per_strategy"]["learn"].items():
         eq_t = res["per_strategy"]["lab"].get(name, 0.0)
         eq_b = res["per_strategy"]["baseline"].get(name)
         st = status.get(name, {})
-        w(f"{name:<22}{eq_l:>10,.2f}{eq_t:>10,.2f}{(f'{eq_b:,.2f}' if eq_b is not None else '-'):>10}  "
+        w(f"{name:<28}{eq_l:>10,.2f}{eq_t:>10,.2f}{(f'{eq_b:,.2f}' if eq_b is not None else '-'):>10}  "
           f"{st.get('status', '?'):<12}{st.get('score', 0):>6.2f}  {(st.get('reason') or '')[:70]}")
     evals = db.get_strategy_evaluations(limit=10**6)
     w(f"Evaluaciones realizadas: {len(evals)}")
@@ -381,8 +436,8 @@ def build_report(res: dict, data_source: str) -> str:
     w("- El evaluador califica con backtests de los ~2 anos ANTERIORES a cada fecha")
     w("  simulada (nunca con datos futuros), pero los umbrales del evaluador y el")
     w("  catalogo se eligieron hoy: sigue habiendo riesgo de sesgo de seleccion.")
-    w("- Aprende y lab reparten el capital entre 17 estrategias y el baseline entre 8:")
-    w("  compare el equity TOTAL, no por estrategia.")
+    w("- Aprende y lab reparten el capital entre todas las estrategias y el baseline")
+    w("  entre las 8 originales: compare el equity TOTAL (en %), no por estrategia.")
     w("- Profit factor y win rate con pocos trades no son estadisticamente fiables.")
     w("- Indicadores calculados una vez sobre toda la historia (en vivo: sobre la")
     w("  ventana de 600 velas); diferencias minimas en EMAs largas.")
@@ -397,6 +452,8 @@ def main_cli():
     ap.add_argument("--funds", type=float, default=None, help="paper funds (default INITIAL_CAPITAL)")
     ap.add_argument("--budget", type=float, default=None, help="risk budget (default 10%% of funds)")
     ap.add_argument("--aggressiveness", type=int, default=None, help="1..10 (default RISK_AGGRESSIVENESS)")
+    ap.add_argument("--symbols", default=None,
+                    help="comma separated, e.g. BTCUSDT,ETHUSDT (default SYMBOLS from .env)")
     ap.add_argument("--eval-interval-hours", type=float, default=168,
                     help="strategy evaluator cadence in simulated hours (live: 24; default 168 "
                          "keeps a 500-day replay around an hour)")
@@ -416,12 +473,16 @@ def main_cli():
     root.setLevel(logging.INFO)
     config.ANTHROPIC_API_KEY = ""   # the replay never calls any external API
 
-    print(f"Descargando velas reales de Binance ({args.days} dias + historia)...", flush=True)
-    data = fetch_data(args.days, os.path.join(args.out, "cache"))
-    end = data["1h"].index[-1] + DELTA["1h"]
+    symbols = ([x.strip().upper() for x in args.symbols.split(",") if x.strip()]
+               if args.symbols else config.SYMBOLS)
+    print(f"Descargando velas reales de Binance ({', '.join(symbols)}; {args.days} dias + historia)...",
+          flush=True)
+    data = fetch_data(args.days, os.path.join(args.out, "cache"), symbols)
+    first = data[symbols[0]]
+    end = first["1h"].index[-1] + DELTA["1h"]
     start = end - pd.Timedelta(days=args.days)
-    print(f"Replay {start:%Y-%m-%d} -> {end:%Y-%m-%d} ({len(data['1h'])} velas 1h, "
-          f"{len(data['4h'])} 4h, {len(data['1d'])} 1d)", flush=True)
+    print(f"Replay {start:%Y-%m-%d} -> {end:%Y-%m-%d} ({len(first['1h'])} velas 1h, "
+          f"{len(first['4h'])} 4h, {len(first['1d'])} 1d por cripto)", flush=True)
 
     def progress(ts, i, n, secs):
         print(f"  {ts:%Y-%m-%d}  {i / max(n, 1):5.1%}  ({secs / 60:.1f} min)", flush=True)
