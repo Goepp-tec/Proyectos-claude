@@ -141,7 +141,15 @@ def init_db():
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE trades ADD COLUMN is_backtest INTEGER DEFAULT 0")
         conn.commit()
-    
+
+    # Paper "books": 'main' (what the bot trades), 'observe' (observation-mode
+    # theoretical trades), 'baseline' (frozen-parameter shadow copies).
+    for table in ("positions", "trades", "balance_history"):
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+        if "book" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN book TEXT DEFAULT 'main'")
+    conn.commit()
+
     # Add live_since table if it doesn't exist
     conn.execute("""
         CREATE TABLE IF NOT EXISTS bot_metadata (
@@ -270,34 +278,44 @@ def update_strategy_params(name: str, params: dict):
 
 # ─── Position helpers ─────────────────────────────────────────────────────────
 
+def _book_filter(book: Optional[str], params: tuple) -> tuple:
+    """SQL fragment + params restricting to one book (book=None -> all books)."""
+    if book is None:
+        return "", params
+    return " AND book=?", params + (book,)
+
+
 def open_position(strategy_name: str, symbol: str, side: str,
                   entry_price: float, quantity: float,
                   stop_loss: float, take_profit: float,
                   order_id: str = "", ml_confidence: float = 0.5,
-                  metadata: dict = None) -> int:
+                  metadata: dict = None, book: str = "main",
+                  entry_time: str = None) -> int:
     conn = get_conn()
     cursor = conn.execute("""
         INSERT INTO positions
         (strategy_name, symbol, side, entry_price, quantity, stop_loss,
-         take_profit, entry_time, order_id, ml_confidence, metadata)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         take_profit, entry_time, order_id, ml_confidence, metadata, book)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (strategy_name, symbol, side, entry_price, quantity, stop_loss,
-          take_profit, utc_now_iso(), order_id,
-          ml_confidence, json.dumps(metadata or {})))
+          take_profit, entry_time or utc_now_iso(), order_id,
+          ml_confidence, json.dumps(metadata or {}), book))
     conn.commit()
     return cursor.lastrowid
 
 
-def get_open_positions(strategy_name: str = None) -> List[Dict]:
+def get_open_positions(strategy_name: str = None, book: Optional[str] = "main") -> List[Dict]:
     conn = get_conn()
     if strategy_name:
+        extra, params = _book_filter(book, (strategy_name,))
         rows = conn.execute(
-            "SELECT * FROM positions WHERE status='OPEN' AND strategy_name=?",
-            (strategy_name,)
+            "SELECT * FROM positions WHERE status='OPEN' AND strategy_name=?" + extra,
+            params
         ).fetchall()
     else:
+        extra, params = _book_filter(book, ())
         rows = conn.execute(
-            "SELECT * FROM positions WHERE status='OPEN'"
+            "SELECT * FROM positions WHERE status='OPEN'" + extra, params
         ).fetchall()
     result = []
     for row in rows:
@@ -320,52 +338,47 @@ def record_trade(strategy_name: str, symbol: str, side: str,
                  pnl: float, pnl_pct: float, fees_paid: float,
                  entry_time: str, exit_time: str, duration_hours: float,
                  exit_reason: str, entry_features: dict = None,
-                 is_backtest: bool = False) -> int:
+                 is_backtest: bool = False, book: str = "main",
+                 closed_at: str = None) -> int:
     """Record a trade. Set is_backtest=True for backtest trades (not shown in history)."""
     conn = get_conn()
     cursor = conn.execute("""
         INSERT INTO trades
         (strategy_name, symbol, side, entry_price, exit_price, quantity,
          pnl, pnl_pct, fees_paid, entry_time, exit_time, duration_hours,
-         exit_reason, entry_features, is_backtest)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         exit_reason, entry_features, is_backtest, book, closed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                COALESCE(?, datetime('now')))
     """, (strategy_name, symbol, side, entry_price, exit_price, quantity,
           pnl, pnl_pct, fees_paid, entry_time, exit_time, duration_hours,
-          exit_reason, json.dumps(entry_features or {}), 1 if is_backtest else 0))
+          exit_reason, json.dumps(entry_features or {}), 1 if is_backtest else 0,
+          book, closed_at))
     conn.commit()
     return cursor.lastrowid
 
 
-def get_trades(strategy_name: str = None, limit: int = 500, include_backtest: bool = False) -> List[Dict]:
+def get_trades(strategy_name: str = None, limit: int = 500, include_backtest: bool = False,
+               book: Optional[str] = "main") -> List[Dict]:
     """
     Get trades from the database.
-    
+
     Args:
         strategy_name: Filter by strategy (optional)
         limit: Maximum number of trades to return
         include_backtest: If False (default), exclude backtest trades
+        book: paper book to read ('main' by default, None = all books)
     """
     conn = get_conn()
+    where, params = "WHERE 1=1", ()
     if strategy_name:
-        if include_backtest:
-            rows = conn.execute(
-                "SELECT * FROM trades WHERE strategy_name=? ORDER BY closed_at DESC LIMIT ?",
-                (strategy_name, limit)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM trades WHERE strategy_name=? AND is_backtest=0 ORDER BY closed_at DESC LIMIT ?",
-                (strategy_name, limit)
-            ).fetchall()
-    else:
-        if include_backtest:
-            rows = conn.execute(
-                "SELECT * FROM trades ORDER BY closed_at DESC LIMIT ?", (limit,)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM trades WHERE is_backtest=0 ORDER BY closed_at DESC LIMIT ?", (limit,)
-            ).fetchall()
+        where, params = where + " AND strategy_name=?", (strategy_name,)
+    if not include_backtest:
+        where += " AND is_backtest=0"
+    extra, params = _book_filter(book, params)
+    rows = conn.execute(
+        f"SELECT * FROM trades {where}{extra} ORDER BY closed_at DESC, id DESC LIMIT ?",
+        params + (limit,)
+    ).fetchall()
     result = []
     for row in rows:
         d = dict(row)
@@ -374,24 +387,18 @@ def get_trades(strategy_name: str = None, limit: int = 500, include_backtest: bo
     return result
 
 
-def get_trade_stats(strategy_name: str = None, include_backtest: bool = False) -> Dict:
+def get_trade_stats(strategy_name: str = None, include_backtest: bool = False,
+                    book: Optional[str] = "main") -> Dict:
     """Get trade statistics. Excludes backtest trades by default."""
     conn = get_conn()
+    where, params = "WHERE 1=1", ()
     if strategy_name:
-        if include_backtest:
-            where = "WHERE strategy_name=?"
-            params = (strategy_name,)
-        else:
-            where = "WHERE strategy_name=? AND is_backtest=0"
-            params = (strategy_name,)
-    else:
-        if include_backtest:
-            where = ""
-            params = ()
-        else:
-            where = "WHERE is_backtest=0"
-            params = ()
-    
+        where, params = where + " AND strategy_name=?", (strategy_name,)
+    if not include_backtest:
+        where += " AND is_backtest=0"
+    extra, params = _book_filter(book, params)
+    where += extra
+
     query = f"""
         SELECT
             COUNT(*) as total_trades,
@@ -469,17 +476,19 @@ def get_journal_entries(strategy_name: str = None, limit: int = 100, include_bac
 # ─── Balance helpers ──────────────────────────────────────────────────────────
 
 def record_balance(total_balance: float, realized_pnl: float,
-                   unrealized_pnl: float, strategy_breakdown: dict = None):
+                   unrealized_pnl: float, strategy_breakdown: dict = None,
+                   book: str = "main"):
     conn = get_conn()
     conn.execute("""
-        INSERT INTO balance_history (total_balance, realized_pnl, unrealized_pnl, strategy_breakdown)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO balance_history (total_balance, realized_pnl, unrealized_pnl, strategy_breakdown, book)
+        VALUES (?, ?, ?, ?, ?)
     """, (total_balance, realized_pnl, unrealized_pnl,
-          json.dumps(strategy_breakdown or {})))
+          json.dumps(strategy_breakdown or {}), book))
     conn.commit()
 
 
-def get_balance_history(days: int = 30, include_backtest: bool = False) -> List[Dict]:
+def get_balance_history(days: int = 30, include_backtest: bool = False,
+                        book: str = "main") -> List[Dict]:
     """
     Get balance history for equity curve.
     
@@ -496,15 +505,15 @@ def get_balance_history(days: int = 30, include_backtest: bool = False) -> List[
         # Filter to only include data from live trading start
         rows = conn.execute("""
             SELECT * FROM balance_history
-            WHERE recorded_at >= ?
+            WHERE recorded_at >= ? AND book=?
             ORDER BY recorded_at ASC
-        """, (live_since,)).fetchall()
+        """, (live_since, book)).fetchall()
     else:
         rows = conn.execute("""
             SELECT * FROM balance_history
-            WHERE recorded_at >= datetime('now', ? || ' days')
+            WHERE recorded_at >= datetime('now', ? || ' days') AND book=?
             ORDER BY recorded_at ASC
-        """, (f"-{days}",)).fetchall()
+        """, (f"-{days}", book)).fetchall()
     
     result = []
     for row in rows:
@@ -514,9 +523,10 @@ def get_balance_history(days: int = 30, include_backtest: bool = False) -> List[
     return result
 
 
-def get_latest_balance() -> Optional[Dict]:
+def get_latest_balance(book: str = "main") -> Optional[Dict]:
     row = get_conn().execute(
-        "SELECT * FROM balance_history ORDER BY recorded_at DESC LIMIT 1"
+        "SELECT * FROM balance_history WHERE book=? ORDER BY recorded_at DESC, id DESC LIMIT 1",
+        (book,)
     ).fetchone()
     if row:
         d = dict(row)

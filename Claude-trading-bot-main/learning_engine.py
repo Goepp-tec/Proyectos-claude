@@ -574,7 +574,7 @@ Be specific and data-driven. No generic platitudes. Speak as if reviewing your o
                 today = date.today().isoformat()
                 conn  = db.get_conn()
                 row   = conn.execute(
-                    "SELECT SUM(pnl) FROM trades WHERE strategy_name=? AND DATE(closed_at)=?",
+                    "SELECT SUM(pnl) FROM trades WHERE strategy_name=? AND DATE(closed_at)=? AND book='main'",
                     (name, today),
                 ).fetchone()
                 daily_pnl = float(row[0] or 0)

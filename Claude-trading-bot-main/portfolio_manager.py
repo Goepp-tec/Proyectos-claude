@@ -15,7 +15,7 @@ Changes:
 import logging
 import threading
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import config
 import database as db
@@ -29,9 +29,23 @@ logger = logging.getLogger(__name__)
 class PortfolioManager:
 
     def __init__(self, client: BinanceClient,
-                 strategies: List[BaseStrategy]):
+                 strategies: List[BaseStrategy],
+                 book: str = "main",
+                 simulate_fills: bool = False,
+                 clock: Optional[Callable[[], str]] = None):
+        """
+        book           : paper book this manager trades in ('main', 'observe',
+                         'baseline'); positions/trades/balances are kept per book.
+        simulate_fills : fill at current_price ± SLIPPAGE without calling the
+                         client (observation mode, baseline shadows, replay).
+        clock          : returns the current time as ISO string (replay injects
+                         the historical candle time); defaults to real UTC now.
+        """
         self.client      = client
         self.strategies  = {s.name: s for s in strategies}
+        self.book        = book
+        self.simulate_fills = simulate_fills
+        self._clock      = clock or utc_now_iso
         self._lock       = threading.Lock()
 
         # In-memory capital state (persisted to DB periodically)
@@ -54,11 +68,11 @@ class PortfolioManager:
             # Reconstruct true capital from first principles:
             #   total_cap = initial share + realized P&L + unrealized P&L
             #   free_cap  = total_cap - notional locked in open positions
-            stats     = db.get_trade_stats(strat.name)
+            stats     = db.get_trade_stats(strat.name, book=self.book)
             realized  = float(stats.get("total_pnl") or 0)
 
             # Compute unrealized P&L from current open positions
-            open_pos  = db.get_open_positions(strat.name)
+            open_pos  = db.get_open_positions(strat.name, book=self.book)
             committed = 0.0
             unrealized = 0.0
             for p in open_pos:
@@ -82,15 +96,26 @@ class PortfolioManager:
             # Keep DB in sync so dashboards and future restarts see the right value.
             # Store TOTAL allocated capital (not free), so dashboard shows consistent values
             # across all strategies and user isn't confused by lower numbers when positions open.
-            db.update_strategy_capital(strat.name, total_cap)
+            self._sync_capital_row(strat.name, total_cap)
             logger.info(
-                f"  {strat.name}: ${free_cap:,.2f} free  "
+                f"  [{self.book}] {strat.name}: ${free_cap:,.2f} free  "
                 f"(${total_cap:,.2f} total, ${committed:,.2f} committed)"
             )
 
     def reallocate(self, current_price: float = 0.0):
         """Re-balance capital from strategies that are inactive or over-limit."""
         self._allocate_capital(current_price)
+
+    def _sync_capital_row(self, strat_name: str, capital: float):
+        # The strategies table (dashboard) describes the main book only.
+        if self.book == "main":
+            db.update_strategy_capital(strat_name, capital)
+
+    def _place_order(self, side: str, quantity: float, current_price: float) -> Optional[dict]:
+        if not self.simulate_fills:
+            return self.client.place_market_order(config.SYMBOL, side, quantity)
+        fill = current_price * (1 + config.SLIPPAGE if side == "BUY" else 1 - config.SLIPPAGE)
+        return {"orderId": f"SIM_{self.book}", "fills": [{"price": fill, "qty": quantity}]}
 
     # ─── Main entry-point called by the bot loop ──────────────────────────────
 
@@ -116,7 +141,7 @@ class PortfolioManager:
             strat_name = strategy.name
 
             if candle_ts is not None:
-                key = f"last_signal_candle:{strat_name}"
+                key = f"last_signal_candle:{self.book}:{strat_name}"
                 if db.get_meta(key) == candle_ts:
                     return False
                 db.set_meta(key, candle_ts)
@@ -125,7 +150,7 @@ class PortfolioManager:
             if not self._risk_check(strat_name, signal, ml_confidence, current_price):
                 return False
 
-            open_positions = db.get_open_positions(strat_name)
+            open_positions = db.get_open_positions(strat_name, book=self.book)
             if len(open_positions) >= config.MAX_OPEN_POSITIONS_PER_STRATEGY:
                 logger.debug(f"{strat_name}: max open positions reached")
                 return False
@@ -144,7 +169,7 @@ class PortfolioManager:
 
             # ── Place order ───────────────────────────────────────────────────
             side = "BUY" if signal.type == SignalType.BUY else "SELL"
-            order = self.client.place_market_order(config.SYMBOL, side, quantity)
+            order = self._place_order(side, quantity, current_price)
             if order is None:
                 logger.error(f"{strat_name}: order placement failed")
                 return False
@@ -172,14 +197,16 @@ class PortfolioManager:
                 order_id=str(order.get("orderId", "")),
                 ml_confidence=ml_confidence,
                 metadata=signal.metadata or {},
+                book=self.book,
+                entry_time=self._clock(),
             )
 
             # Deduct reserved capital (notional value)
             self._capital[strat_name] -= notional
-            db.update_strategy_capital(strat_name, self._capital[strat_name])
+            self._sync_capital_row(strat_name, self._capital[strat_name])
 
             logger.info(
-                f"[{strat_name}] OPEN {side} {quantity:.5f} BTC @ ${fill_price:,.2f} "
+                f"[{self.book}:{strat_name}] OPEN {side} {quantity:.5f} BTC @ ${fill_price:,.2f} "
                 f"| SL=${sl:,.2f} TP=${tp:,.2f} | notional=${notional:,.2f}"
             )
             return True
@@ -191,7 +218,8 @@ class PortfolioManager:
         Check all open positions against current price.
         Close any that have hit SL or TP.
         """
-        positions = db.get_open_positions()
+        positions = [p for p in db.get_open_positions(book=self.book)
+                     if p["strategy_name"] in self.strategies]
         for pos in positions:
             hit, reason = self._check_sl_tp(pos, current_price)
             if hit:
@@ -214,7 +242,7 @@ class PortfolioManager:
     def close_position_by_signal(self, strategy: BaseStrategy,
                                  current_price: float):
         """Force-close open positions for a strategy on a reversal signal."""
-        positions = db.get_open_positions(strategy.name)
+        positions = db.get_open_positions(strategy.name, book=self.book)
         for pos in positions:
             self._close_position(pos, current_price, "SIGNAL_EXIT")
 
@@ -226,7 +254,7 @@ class PortfolioManager:
 
         # Place exit order
         exit_side = "SELL" if side == "LONG" else "BUY"
-        order = self.client.place_market_order(config.SYMBOL, exit_side, qty)
+        order = self._place_order(exit_side, qty, current_price)
         if order is None:
             logger.error(f"Could not close position {pos['id']} for {strat_name}")
             return
@@ -243,8 +271,8 @@ class PortfolioManager:
         net_pnl  = raw_pnl - fee_cost
         pnl_pct  = raw_pnl / (entry * qty) if entry * qty > 0 else 0
 
-        entry_dt = pos.get("entry_time", utc_now_iso())
-        exit_dt  = utc_now_iso()
+        entry_dt = pos.get("entry_time") or self._clock()
+        exit_dt  = self._clock()
         try:
             dur_hours = (
                 datetime.fromisoformat(exit_dt) - datetime.fromisoformat(entry_dt)
@@ -268,6 +296,8 @@ class PortfolioManager:
             duration_hours=dur_hours,
             exit_reason=reason,
             entry_features=entry_features,
+            book=self.book,
+            closed_at=exit_dt,
         )
 
         db.close_position(pos["id"])
@@ -277,7 +307,7 @@ class PortfolioManager:
         with self._lock:
             self._capital[strat_name] = self._capital.get(strat_name, 0) + recovered
             cap = self._capital[strat_name]
-            db.update_strategy_capital(strat_name, cap)
+            self._sync_capital_row(strat_name, cap)
             # Update peak for drawdown tracking
             if cap > self._peak_capital.get(strat_name, cap):
                 self._peak_capital[strat_name] = cap
@@ -287,7 +317,7 @@ class PortfolioManager:
                 strat.record_trade_outcome(net_pnl > 0)
 
         logger.info(
-            f"[{strat_name}] CLOSE {side} {qty:.5f} BTC @ ${exit_price:,.2f} "
+            f"[{self.book}:{strat_name}] CLOSE {side} {qty:.5f} BTC @ ${exit_price:,.2f} "
             f"| PnL ${net_pnl:+.2f} ({pnl_pct*100:+.2f}%) | {reason}"
         )
 
@@ -298,7 +328,7 @@ class PortfolioManager:
     def _strategy_equity(self, strat_name: str, current_price: float) -> float:
         """Free capital + notional committed in open positions + unrealized PnL."""
         equity = self._capital.get(strat_name, 0.0)
-        for p in db.get_open_positions(strat_name):
+        for p in db.get_open_positions(strat_name, book=self.book):
             ep, qty = float(p["entry_price"]), float(p["quantity"])
             equity += ep * qty
             if current_price > 0:
@@ -366,12 +396,12 @@ class PortfolioManager:
             if not strat.is_active:
                 continue
             cap = self._capital.get(strat_name, 0.0)
-            stats = db.get_trade_stats(strat_name)
+            stats = db.get_trade_stats(strat_name, book=self.book)
             realized = float(stats.get("total_pnl") or 0)
             realized_sum += realized
 
             # Unrealized from open positions
-            open_pos = db.get_open_positions(strat_name)
+            open_pos = db.get_open_positions(strat_name, book=self.book)
             unreal = 0.0
             committed_notional = 0.0
             for p in open_pos:
