@@ -1,0 +1,16 @@
+# Keep secrets, runtime data and local environments out of the image.
+.env
+*.db
+*.db-shm
+*.db-wal
+*.log
+models/
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.git
+evidencias/
+backups/
+reports/

@@ -1,26 +1,26 @@
 # Docker Compose for BTC Trading Bot
-# Run: docker-compose up -d
-
-version: '3.8'
+# First time:  mkdir -p data models && cp .env.example .env
+# Run:         docker compose up -d --build
 
 services:
   trading-bot:
     build: .
     container_name: btc-trading-bot
     restart: unless-stopped
+    env_file: .env
     environment:
       - PYTHONUNBUFFERED=1
-      - LOG_LEVEL=INFO
+      # DB (+ its -wal/-shm files) and log live in the mounted ./data folder.
+      - DATA_DIR=/app/data
     volumes:
-      - ./trading_bot.db:/app/trading_bot.db
+      - ./data:/app/data
       - ./models:/app/models
-      - ./trading_bot.log:/app/trading_bot.log
     ports:
-      - "8050:8050"
-
-  # Optional: Prometheus metrics exporter
-  # metrics-exporter:
-  #   image: prom/node-exporter
-  #   container_name: bot-metrics
-  #   ports:
-  #     - "9100:9100"
+      # Localhost only: the dashboard has no login, and Docker bypasses ufw.
+      # View it through an SSH tunnel: ssh -L 8050:localhost:8050 user@server
+      - "127.0.0.1:8050:8050"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

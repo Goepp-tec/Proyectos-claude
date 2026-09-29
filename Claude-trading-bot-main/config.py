@@ -89,7 +89,11 @@ POSITION_CHECK_INTERVAL_SEC = 20    # check SL/TP every 20s
 LEARNING_UPDATE_INTERVAL_SEC = 180  # run learning update every 3 minutes
 
 # ─── Database ──────────────────────────────────────────────────────────────────
-DB_PATH = os.path.join(os.path.dirname(__file__), "trading_bot.db")
+# DATA_DIR holds the SQLite DB (and its -wal/-shm files) plus the log. In Docker
+# mount a whole folder here: mounting only the .db file leaves the WAL inside
+# the container, where it is lost when the container is recreated.
+DATA_DIR = os.getenv("DATA_DIR") or os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(DATA_DIR, "trading_bot.db")
 
 # ─── Dashboard ─────────────────────────────────────────────────────────────────
 DASHBOARD_HOST      = "0.0.0.0"
@@ -98,7 +102,7 @@ DASHBOARD_UPDATE_MS = 10000   # refresh every 10 seconds
 
 # ─── Logging ───────────────────────────────────────────────────────────────────
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-LOG_FILE  = os.path.join(os.path.dirname(__file__), "trading_bot.log")
+LOG_FILE  = os.path.join(DATA_DIR, "trading_bot.log")
 
 # ─── Data Management ────────────────────────────────────────────────────────────
 # Set to "true" to clear all trading data on startup and start fresh
