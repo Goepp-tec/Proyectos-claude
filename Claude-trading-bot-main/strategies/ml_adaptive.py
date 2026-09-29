@@ -46,7 +46,8 @@ METADATA_PATH = os.path.join(MODEL_DIR, "ml_adaptive_meta.pkl")
 class MLAdaptiveStrategy(BaseStrategy):
 
     def __init__(self, params: dict = None):
-        defaults = config.STRATEGY_PARAMS["ML_Adaptive"].copy()
+        # No ML_Adaptive entry in config.STRATEGY_PARAMS; every param has an in-code default.
+        defaults = dict(config.STRATEGY_PARAMS.get("ML_Adaptive", {}))
         if params:
             defaults.update(params)
         super().__init__("ML_Adaptive", defaults)
