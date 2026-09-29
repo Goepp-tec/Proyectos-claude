@@ -54,6 +54,16 @@ def test_balance_history_is_per_book():
     assert db.get_latest_balance(book="baseline")["total_balance"] == 12_345
 
 
+def test_small_per_strategy_capital_can_still_trade(monkeypatch):
+    """1000 USD split over 22 strategies = 45 USD each: the old fixed 50 USD minimum
+    blocked the whole lab book. The floor now follows Binance's minimum order."""
+    monkeypatch.setattr(config, "INITIAL_CAPITAL", 1_000.0)
+    strats = [_strategy(f"S{i}") for i in range(22)]
+    lab = PortfolioManager(Mock(), strats, book="lab", simulate_fills=True)
+    assert lab._capital["S0"] == pytest.approx(1_000 / 22)
+    assert lab.process_signal(lab.strategies["S0"], _buy(50_000.0), 50_000.0, 0.6)
+
+
 def test_non_main_books_do_not_overwrite_strategy_capital_row():
     db.upsert_strategy("S", capital=10_000, params={}, is_active=True)
     base = PortfolioManager(Mock(), [_strategy("S")], book="baseline", simulate_fills=True)

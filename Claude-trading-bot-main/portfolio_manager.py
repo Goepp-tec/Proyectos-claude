@@ -208,7 +208,9 @@ class PortfolioManager:
                 return False, "risk_check"
 
             capital = self._capital.get(strat_name, 0.0)
-            if capital < 50:
+            # Floor follows Binance's minimum order (x2), not a fixed 50 USD: with
+            # 1000 USD over 22 strategies each has ~45 USD and nothing could trade.
+            if capital < 2 * config.MIN_ORDER_USD:
                 logger.warning(f"{strat_name}: insufficient capital (${capital:.2f})")
                 return False, "insufficient_capital"
 
