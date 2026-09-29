@@ -36,6 +36,7 @@ from binance_client import BinanceClient
 from backtester import run_all_backtests
 from portfolio_manager import PortfolioManager
 from learning_engine import LearningEngine
+from adaptive_tuner import AdaptiveTuner
 from strategies import ALL_STRATEGIES
 
 # ─── Logging setup ────────────────────────────────────────────────────────────
@@ -102,6 +103,21 @@ def make_portfolio(client, strategies, book: str, clock=None) -> PortfolioManage
                             simulate_fills=(book != "main"), clock=clock)
 
 
+def restore_learned_params(learners):
+    AdaptiveTuner.restore_learned_params({s.name: s for s in learners})
+
+
+def build_baselines(active_names):
+    """Frozen default-param copy of every strategy; active if its learner is active."""
+    baselines = []
+    for S in ALL_STRATEGIES:
+        b = S()
+        b.is_active = b.name in active_names
+        b.freeze()
+        baselines.append(b)
+    return baselines
+
+
 # ─── Shutdown flag ────────────────────────────────────────────────────────────
 _shutdown = threading.Event()
 
@@ -124,6 +140,9 @@ class TradingBot:
         self.learning:   LearningEngine   = None
         self.book = "main"      # book the (learning) strategies trade in
         self.mode = "TRADE"
+        self.baselines = []     # frozen default-param copies (book 'baseline')
+        self.baseline_portfolio: PortfolioManager = None
+        self.tuner: AdaptiveTuner = None
         self._strat_dfs: Dict[str, object] = {}
         self._logged_candle: Dict[str, str] = {}
         self._current_price: float = 0.0
@@ -152,6 +171,9 @@ class TradingBot:
         # Warm up candle cache
         logger.info("\nLoading candle data…")
         self._refresh_candles()
+
+        # Learned parameter values from previous runs (declared tunables only)
+        restore_learned_params(self.strategies)
 
         # Backtest on real data
         logger.info(f"\nRunning backtests on {config.BACKTEST_DAYS} days of real Binance data…")
@@ -217,6 +239,23 @@ class TradingBot:
         strat_dict = {s.name: s for s in self.strategies}
         self.learning = LearningEngine(strat_dict)
 
+        # Frozen baselines trade the same signals with default params, own capital
+        self.baselines = build_baselines(active_names)
+        self.baseline_portfolio = make_portfolio(self.client, self.baselines, "baseline")
+        self.tuner = AdaptiveTuner(
+            learners=strat_dict,
+            history_fn=self._learning_history,
+            equity_fn=self._strategy_equity,
+            clock=lambda: datetime.now(timezone.utc),
+            learner_book=self.book,
+        )
+        logger.info(
+            f"Learning: {'ON' if config.LEARNING_ENABLED else 'OFF'} "
+            f"(every {config.LEARNING_INTERVAL_HOURS:g}h, walk-forward "
+            f"{config.LEARNING_PROPOSAL_DAYS}d proposal / {config.LEARNING_VALIDATION_DAYS}d validation); "
+            f"{sum(b.is_active for b in self.baselines)} frozen baseline copies"
+        )
+
         # Load journal entries and restore learned patterns from previous runs
         self.learning.learn_from_all_journal_entries()
 
@@ -265,43 +304,50 @@ class TradingBot:
                 self._refresh_candles()
                 price = self._current_price
 
-                for strat in self.strategies:
-                    if not strat.is_active:
-                        continue
-                    interval = strat.candle_interval
-                    df = self._strat_dfs.get(interval)
-                    if df is None or len(df) < strat.min_candles:
-                        logger.debug(
-                            f"[{strat.name}] Insufficient data "
-                            f"({len(df) if df is not None else 0}/{strat.min_candles} candles)"
-                        )
-                        continue
-
-                    ml_conf = self.learning.get_confidence(strat.name, df)
-                    signal = strat.generate_signal(df)
-
-                    if signal.is_actionable:
-                        candle = str(df.index[-1])
-                        if self._logged_candle.get(strat.name) != candle:
-                            self._logged_candle[strat.name] = candle
-                            logger.info(
-                                f"[{strat.name}] SIGNAL {signal.type.value} "
-                                f"conf={signal.confidence:.2f} ml={ml_conf:.2f} "
-                                f"price=${price:,.2f} candle={candle}"
-                            )
-                        placed = self.portfolio.process_signal(
-                            strat, signal, price, ml_confidence=ml_conf,
-                            candle_ts=candle,
-                        )
-                        if placed:
-                            logger.info(f"[{strat.name}] ✓ Paper trade opened")
-                    else:
-                        logger.debug(f"[{strat.name}] HOLD")
+                self._process_signals(self.strategies, self.portfolio, price,
+                                      lambda name, df: self.learning.get_confidence(name, df))
+                self._process_signals(self.baselines, self.baseline_portfolio, price,
+                                      lambda name, df: config.BASELINE_ML_CONFIDENCE)
 
             except Exception as e:
                 logger.error(f"[trading] Error: {e}", exc_info=True)
 
             _shutdown.wait(timeout=config.STRATEGY_CHECK_INTERVAL_SEC)
+
+    def _process_signals(self, strategies, portfolio, price, ml_conf_fn):
+        book = portfolio.book
+        for strat in strategies:
+            if not strat.is_active:
+                continue
+            interval = strat.candle_interval
+            df = self._strat_dfs.get(interval)
+            if df is None or len(df) < strat.min_candles:
+                logger.debug(
+                    f"[{book}:{strat.name}] Insufficient data "
+                    f"({len(df) if df is not None else 0}/{strat.min_candles} candles)"
+                )
+                continue
+
+            ml_conf = ml_conf_fn(strat.name, df)
+            signal = strat.generate_signal(df)
+
+            if signal.is_actionable:
+                candle = str(df.index[-1])
+                if self._logged_candle.get((book, strat.name)) != candle:
+                    self._logged_candle[(book, strat.name)] = candle
+                    logger.info(
+                        f"[{book}:{strat.name}] SIGNAL {signal.type.value} "
+                        f"conf={signal.confidence:.2f} ml={ml_conf:.2f} "
+                        f"price=${price:,.2f} candle={candle}"
+                    )
+                placed = portfolio.process_signal(
+                    strat, signal, price, ml_confidence=ml_conf,
+                    candle_ts=candle,
+                )
+                if placed:
+                    logger.info(f"[{book}:{strat.name}] ✓ Paper trade opened")
+            else:
+                logger.debug(f"[{book}:{strat.name}] HOLD")
 
     # ─── Position monitoring loop (SL/TP) ─────────────────────────────────────
 
@@ -312,6 +358,7 @@ class TradingBot:
                 price = self._current_price
                 if price > 0 and self.portfolio:
                     self.portfolio.check_open_positions(price)
+                    self.baseline_portfolio.check_open_positions(price)
             except Exception as e:
                 logger.error(f"[positions] Error: {e}", exc_info=True)
             _shutdown.wait(timeout=config.POSITION_CHECK_INTERVAL_SEC)
@@ -349,6 +396,9 @@ class TradingBot:
                 strat_dict = {s.name: s for s in self.strategies}
                 self.learning.update_performance_snapshots(strat_dict)
 
+                if config.LEARNING_ENABLED and self.tuner:
+                    self.tuner.run_cycle_if_due()
+
             except Exception as e:
                 logger.error(f"[learning] Error: {e}", exc_info=True)
             _shutdown.wait(timeout=config.LEARNING_UPDATE_INTERVAL_SEC)
@@ -369,10 +419,19 @@ class TradingBot:
                         strategy_breakdown=bal.get("breakdown", {}),
                         book=self.book,
                     )
+                    base = self.baseline_portfolio.total_balance(price)
+                    db.record_balance(
+                        total_balance=base["total_balance"],
+                        realized_pnl=base["realized_pnl"],
+                        unrealized_pnl=base["unrealized_pnl"],
+                        strategy_breakdown=base.get("breakdown", {}),
+                        book="baseline",
+                    )
                     logger.info(
                         f"[balance:{self.book}] ${bal['total_balance']:,.2f} | "
                         f"Realized: ${bal['realized_pnl']:+,.2f} | "
-                        f"Unrealized: ${bal['unrealized_pnl']:+,.2f}"
+                        f"Unrealized: ${bal['unrealized_pnl']:+,.2f} || "
+                        f"baseline ${base['total_balance']:,.2f}"
                     )
             except Exception as e:
                 logger.error(f"[balance] Error: {e}", exc_info=True)
@@ -412,6 +471,14 @@ class TradingBot:
                     logger.debug(f"Refreshed {interval} candles: {len(df)} rows")
             except Exception as e:
                 logger.error(f"[candles] Error refreshing {interval}: {e}")
+
+    def _strategy_equity(self, book: str, name: str) -> float:
+        pm = self.baseline_portfolio if book == "baseline" else self.portfolio
+        return pm.strategy_equity(name, self._current_price)
+
+    def _learning_history(self, interval: str, days: int, end: datetime):
+        df = self.client.get_historical_klines(config.SYMBOL, interval, days)
+        return df[df.index < end]
 
     def _get_strat_interval(self, name: str) -> str:
         for s in self.strategies:

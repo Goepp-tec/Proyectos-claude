@@ -4,15 +4,12 @@ Learning Engine
 After each closed trade:
   1. Feeds features + outcome to ML_Adaptive strategy
   2. Analyzes recent trade patterns (streak, regime, drawdown)
-  3. Tunes strategy parameters based on performance data
-  4. Generates journal entry using Claude AI (if API key set) or rich templates
-  5. Records a reusable lessons database that feeds future strategy decisions
+  3. Generates journal entry using Claude AI (if API key set) or rich templates
+  4. Records a reusable lessons database that feeds future strategy decisions
+  5. Raises the confidence threshold temporarily after consecutive losses
 
-Self-improvement loop:
-  - Win rate drops below 40% over 20 trades → tighten entry filters
-  - Win rate rises above 65% → slightly relax filters to catch more trades
-  - Consecutive losses → raise confidence threshold temporarily
-  - Regime changes detected → bias toward regime-appropriate strategies
+Parameter tuning is NOT done here: see adaptive_tuner.py (walk-forward
+validated, audited, automatic rollback, no LLM).
 """
 
 import json
@@ -130,8 +127,9 @@ class LearningEngine:
             except Exception:
                 pass
 
-        # ── Tune strategy parameters ───────────────────────────────────────────
-        self._tune_strategy(strategy_name)
+        # Parameter tuning lives in adaptive_tuner.AdaptiveTuner (validated,
+        # audited, with rollback); the old name-based _tune_strategy only knew
+        # strategies that are not registered and never changed anything.
 
         # ── Adjust confidence thresholds ───────────────────────────────────────
         self._adjust_confidence(strategy_name)
@@ -194,92 +192,6 @@ class LearningEngine:
                 logger.info(f"Loaded {len(entries)} journal entries for learning")
         except Exception as e:
             logger.warning(f"Failed to load journal entries: {e}")
-
-    # ─── Parameter tuning ─────────────────────────────────────────────────────
-
-    def _tune_strategy(self, strategy_name: str):
-        """
-        Gradient-free parameter adaptation based on recent performance.
-        Changes are logged and persisted to the database.
-        """
-        history = self._recent_pnl.get(strategy_name, [])
-        if len(history) < config.MIN_TRADES_FOR_LEARNING:
-            return
-
-        recent = history[-20:]
-        win_rate = sum(1 for x in recent if x > 0) / len(recent)
-        avg_pnl  = sum(recent) / len(recent)
-
-        strat = self.strategies.get(strategy_name)
-        if strat is None:
-            return
-
-        params = dict(strat.params)
-        changed = False
-        reason = ""
-
-        if win_rate < 0.38 or avg_pnl < -0.008:
-            logger.info(
-                f"[Learning] {strategy_name} underperforming "
-                f"(WR={win_rate:.1%}, avgPnL={avg_pnl:.3%}) — tightening filters"
-            )
-            if strategy_name == "RSI_Bollinger":
-                params["rsi_oversold"]    = max(20, params.get("rsi_oversold", 30) - 2)
-                params["rsi_overbought"]  = min(82, params.get("rsi_overbought", 70) + 2)
-                params["adx_max"]         = max(25, params.get("adx_max", 35) - 3)
-                reason = f"RSI band tightened to [{params['rsi_oversold']},{params['rsi_overbought']}]"
-                changed = True
-
-            elif strategy_name == "MACD_Momentum":
-                params["signal_period"] = min(14, params.get("signal_period", 9) + 1)
-                params["adx_min"]       = min(30, params.get("adx_min", 20) + 3)
-                reason = f"signal_period={params['signal_period']}, adx_min={params['adx_min']}"
-                changed = True
-
-            elif strategy_name == "EMA_Crossover":
-                params["fast_ema"] = min(15, params.get("fast_ema", 9) + 1)
-                reason = f"fast_ema slowed to {params['fast_ema']}"
-                changed = True
-
-            elif strategy_name == "Breakout":
-                params["volume_multiplier"] = min(3.0, params.get("volume_multiplier", 1.8) + 0.2)
-                params["atr_sl_mult"]       = min(2.5, params.get("atr_sl_mult", 1.5) + 0.2)
-                reason = f"vol_mult={params['volume_multiplier']:.1f}, sl_mult={params['atr_sl_mult']:.1f}"
-                changed = True
-
-            elif strategy_name == "ML_Adaptive":
-                params["min_confidence"] = min(0.70, params.get("min_confidence", 0.55) + 0.03)
-                reason = f"min_confidence raised to {params['min_confidence']:.2f}"
-                changed = True
-
-        elif win_rate > 0.65 and avg_pnl > 0.010:
-            logger.info(
-                f"[Learning] {strategy_name} performing well "
-                f"(WR={win_rate:.1%}, avgPnL={avg_pnl:.3%}) — relaxing slightly"
-            )
-            if strategy_name == "RSI_Bollinger":
-                params["rsi_oversold"]   = min(35, params.get("rsi_oversold", 30) + 1)
-                params["rsi_overbought"] = max(65, params.get("rsi_overbought", 70) - 1)
-                reason = f"RSI band loosened to [{params['rsi_oversold']},{params['rsi_overbought']}]"
-                changed = True
-
-            elif strategy_name == "Breakout":
-                params["volume_multiplier"] = max(1.4, params.get("volume_multiplier", 1.8) - 0.1)
-                reason = f"vol_mult relaxed to {params['volume_multiplier']:.1f}"
-                changed = True
-
-            elif strategy_name == "ML_Adaptive":
-                params["min_confidence"] = max(0.45, params.get("min_confidence", 0.55) - 0.02)
-                reason = f"min_confidence relaxed to {params['min_confidence']:.2f}"
-                changed = True
-
-        if changed:
-            strat.update_params(params)
-            try:
-                db.update_strategy_params(strategy_name, params)
-            except Exception:
-                pass
-            logger.info(f"[Learning] {strategy_name} params updated: {reason}")
 
     # ─── Confidence adjustment ─────────────────────────────────────────────────
 
