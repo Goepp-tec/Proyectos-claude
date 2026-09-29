@@ -38,7 +38,8 @@ from backtester import run_all_backtests
 from portfolio_manager import PortfolioManager
 from learning_engine import LearningEngine
 from adaptive_tuner import AdaptiveTuner
-from strategies import ALL_STRATEGIES
+from strategies import ALL_STRATEGIES, CANDIDATE_STRATEGIES
+from strategy_evaluator import StrategyEvaluator
 
 # ─── Logging setup ────────────────────────────────────────────────────────────
 # Console handler with colors (if available)
@@ -109,7 +110,10 @@ def resolve_trading_mode(strategies, bt_results, allow_unvalidated: bool, lock: 
         saved = db.get_meta("trading_mode_lock")
         if saved:
             s = json.loads(saved)
-            active = [x for x in strategies if x.name in set(s["active"])]
+            if s["mode"] in ("OBSERVE", "TRADE_UNVALIDATED"):
+                active = list(strategies)   # "all strategies", incl. ones added since
+            else:
+                active = [x for x in strategies if x.name in set(s["active"])]
             logger.info(f"Trading mode locked by the running test: {s['mode']} ({s['book']})")
             return active, s["book"], s["mode"]
     active, book, mode = select_trading_mode(strategies, bt_results, allow_unvalidated)
@@ -127,6 +131,21 @@ def make_portfolio(client, strategies, book: str, clock=None) -> PortfolioManage
 
 def restore_learned_params(learners):
     AdaptiveTuner.restore_learned_params({s.name: s for s in learners})
+
+
+def build_lab(learners):
+    """
+    'lab' copies of the learning strategies: they share the params dict (tuned
+    values follow) but keep their own signal state, and trade every signal
+    without the evaluator gate — the live evidence the evaluator reads.
+    """
+    lab = []
+    for s in learners:
+        copy = type(s)()
+        copy.params = s.params
+        copy.is_active = True
+        lab.append(copy)
+    return lab
 
 
 def build_baselines(active_names):
@@ -157,7 +176,9 @@ class TradingBot:
         db.init_db()
         logger.info("Database initialised")
         self.client     = BinanceClient()
-        self.strategies = [S() for S in ALL_STRATEGIES]
+        # Registered strategies + the candidate catalog; the strategy evaluator
+        # decides which of them may trade in the learning book, and when.
+        self.strategies = [S() for S in ALL_STRATEGIES + CANDIDATE_STRATEGIES]
         self.portfolio:  PortfolioManager = None
         self.learning:   LearningEngine   = None
         self.book = "main"      # book the (learning) strategies trade in
@@ -166,6 +187,9 @@ class TradingBot:
         self.baselines = []     # frozen default-param copies (book 'baseline')
         self.baseline_portfolio: PortfolioManager = None
         self.tuner: AdaptiveTuner = None
+        self.lab = []           # ungated copies of all learners (book 'lab')
+        self.lab_portfolio: PortfolioManager = None
+        self.evaluator: StrategyEvaluator = None
         self._strat_dfs: Dict[str, object] = {}
         self._logged_candle: Dict[str, str] = {}
         self._current_price: float = 0.0
@@ -266,18 +290,30 @@ class TradingBot:
         # Frozen baselines trade the same signals with default params, own capital
         self.baselines = build_baselines(active_names)
         self.baseline_portfolio = make_portfolio(self.client, self.baselines, "baseline")
+        # Parameter tuning is compared against baselines, so it only covers the
+        # registered strategies (candidates are rated by the evaluator instead).
+        registered = {S().name for S in ALL_STRATEGIES}
         self.tuner = AdaptiveTuner(
-            learners=strat_dict,
+            learners={n: s for n, s in strat_dict.items() if n in registered},
             history_fn=self._learning_history,
             equity_fn=self._strategy_equity,
             clock=lambda: datetime.now(timezone.utc),
             learner_book=self.book,
         )
+        # Lab copies trade everything not discarded: live evidence for the evaluator
+        self.lab = build_lab(self.strategies)
+        self.lab_portfolio = make_portfolio(self.client, self.lab, "lab")
+        self.evaluator = StrategyEvaluator(
+            strat_dict, history_fn=self._learning_history,
+            clock=lambda: datetime.now(timezone.utc), live_book="lab",
+        )
         logger.info(
             f"Learning: {'ON' if config.LEARNING_ENABLED else 'OFF'} "
             f"(every {config.LEARNING_INTERVAL_HOURS:g}h, walk-forward "
             f"{config.LEARNING_PROPOSAL_DAYS}d proposal / {config.LEARNING_VALIDATION_DAYS}d validation); "
-            f"{sum(b.is_active for b in self.baselines)} frozen baseline copies"
+            f"{sum(b.is_active for b in self.baselines)} frozen baseline copies; "
+            f"evaluator {'ON' if config.EVAL_ENABLED else 'OFF'} over {len(self.strategies)} strategies "
+            f"({len(CANDIDATE_STRATEGIES)} from the candidate catalog)"
         )
 
         # Load journal entries and restore learned patterns from previous runs
@@ -331,16 +367,33 @@ class TradingBot:
                 price = self._current_price
 
                 self._process_signals(self.strategies, self.portfolio, price,
-                                      lambda name, df: self.learning.get_confidence(name, df))
+                                      lambda name, df: self.learning.get_confidence(name, df),
+                                      gate=self._learner_gate)
                 self._process_signals(self.baselines, self.baseline_portfolio, price,
                                       lambda name, df: config.BASELINE_ML_CONFIDENCE)
+                self._process_signals(self.lab, self.lab_portfolio, price,
+                                      lambda name, df: config.BASELINE_ML_CONFIDENCE,
+                                      gate=self._lab_gate)
 
             except Exception as e:
                 logger.error(f"[trading] Error: {e}", exc_info=True)
 
             _shutdown.wait(timeout=config.STRATEGY_CHECK_INTERVAL_SEC)
 
-    def _process_signals(self, strategies, portfolio, price, ml_conf_fn):
+    def _learner_gate(self, strat, signal, df):
+        """Blocked reason for the learning book, or None if the evaluator allows it."""
+        if not config.EVAL_ENABLED or self.evaluator is None:
+            return None
+        ok, why = self.evaluator.can_trade(strat, signal.type, df)
+        return None if ok else why
+
+    def _lab_gate(self, strat, signal, df):
+        """The lab tests everything except discarded strategies (value 0, never again)."""
+        if StrategyEvaluator.is_discarded(strat.name):
+            return "evaluator: DESCARTADA (valor 0)"
+        return None
+
+    def _process_signals(self, strategies, portfolio, price, ml_conf_fn, gate=None):
         book = portfolio.book
         for strat in strategies:
             if not strat.is_active:
@@ -369,6 +422,7 @@ class TradingBot:
                 placed = portfolio.process_signal(
                     strat, signal, price, ml_confidence=ml_conf,
                     candle_ts=candle,
+                    blocked_reason=gate(strat, signal, df) if gate else None,
                 )
                 if placed:
                     logger.info(f"[{book}:{strat.name}] ✓ Paper trade opened")
@@ -385,6 +439,7 @@ class TradingBot:
                 if price > 0 and self.portfolio:
                     self.portfolio.check_open_positions(price)
                     self.baseline_portfolio.check_open_positions(price)
+                    self.lab_portfolio.check_open_positions(price)
             except Exception as e:
                 logger.error(f"[positions] Error: {e}", exc_info=True)
             _shutdown.wait(timeout=config.POSITION_CHECK_INTERVAL_SEC)
@@ -400,6 +455,8 @@ class TradingBot:
                 strat_dict = {s.name: s for s in self.strategies}
                 self.learning.update_performance_snapshots(strat_dict)
 
+                if config.EVAL_ENABLED and self.evaluator:
+                    self.evaluator.run_cycle_if_due()
                 if config.LEARNING_ENABLED and self.tuner:
                     self.tuner.run_cycle_if_due()
 

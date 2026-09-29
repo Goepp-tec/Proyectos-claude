@@ -126,6 +126,9 @@ class AdaptiveTuner:
 
         self._history_cache.clear()
         for strat in self.learners.values():
+            status = db.get_strategy_status(strat.name)
+            if status and status["status"] == "DESCARTADA":
+                continue   # rated worthless by the strategy evaluator: not worth tuning
             if strat.is_active and not strat.frozen and strat.TUNABLE_PARAMS:
                 try:
                     self._propose(strat, now)

@@ -82,6 +82,19 @@ def default_backtest(strategy: BaseStrategy, df: pd.DataFrame):
     return [(t.entry_time, t.side, t.pnl - t.fees) for t in r.trades], r.max_drawdown
 
 
+def _not_viable_because(m: dict) -> str:
+    why = []
+    if m["trades"] < config.VIABLE_MIN_TRADES:
+        why.append(f"{m['trades']} trades < {config.VIABLE_MIN_TRADES}")
+    if m["profit_factor"] < config.VIABLE_MIN_PF:
+        why.append(f"PF {m['profit_factor']:.2f} < {config.VIABLE_MIN_PF}")
+    if m["profitable_windows"] < config.VIABLE_MIN_WINDOWS:
+        why.append(f"rentable en {m['profitable_windows']}/{m['windows']} ventanas")
+    if m["worst_drawdown"] > config.VIABLE_MAX_DRAWDOWN:
+        why.append(f"drawdown {m['worst_drawdown']:.1%}")
+    return ", ".join(why) or "no cumple los minimos"
+
+
 def classify(m: dict) -> dict:
     """Pure rating from aggregated metrics (see module docstring)."""
     n, pf, pw, windows = m["trades"], m["profit_factor"], m["profitable_windows"], m["windows"]
@@ -117,7 +130,8 @@ def classify(m: dict) -> dict:
     if good_regimes:
         where = ", ".join(REGIME_ES[r] for r in good_regimes)
         return {**out, "status": "CONDICIONAL", "allowed_regimes": good_regimes,
-                "reason": f"en conjunto no es viable (PF {pf:.2f}), pero funciona en: {where}"}
+                "reason": f"en conjunto no es viable ({_not_viable_because(m)}), "
+                          f"pero funciona en: {where}"}
     if n < config.VIABLE_MIN_TRADES:
         why = f"pocos trades ({n} < {config.VIABLE_MIN_TRADES}) para decidir"
     else:

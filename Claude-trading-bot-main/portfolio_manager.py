@@ -123,7 +123,8 @@ class PortfolioManager:
                        signal: Signal,
                        current_price: float,
                        ml_confidence: float = 0.5,
-                       candle_ts: Optional[str] = None) -> bool:
+                       candle_ts: Optional[str] = None,
+                       blocked_reason: Optional[str] = None) -> bool:
         """
         Evaluate a signal from a strategy and execute if conditions are met.
         Returns True if an order was placed.
@@ -146,7 +147,10 @@ class PortfolioManager:
                     return False
                 db.set_meta(key, candle_ts)
 
-            placed, reason = self._open_from_signal(strategy, signal, current_price, ml_confidence)
+            if blocked_reason:   # e.g. the strategy evaluator does not allow it now
+                placed, reason = False, blocked_reason
+            else:
+                placed, reason = self._open_from_signal(strategy, signal, current_price, ml_confidence)
             if candle_ts is not None:
                 db.record_signal(
                     book=self.book, strategy_name=strat_name, candle_ts=candle_ts,
