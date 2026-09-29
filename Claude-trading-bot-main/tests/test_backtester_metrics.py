@@ -47,6 +47,19 @@ def test_few_trades_cannot_activate_even_with_great_metrics():
     assert not r.passes_threshold
 
 
+def test_backtest_trades_carry_the_candle_timestamps():
+    """Trades used to be stamped with datetime.utcnow() (index dropped): no regime, 0h durations."""
+    from strategies.ema5_momentum import EMA5MomentumStrategy
+    from tests.test_candidate_strategies import _prices
+    df = _prices(n=400, freq="1D")
+    r = Backtester(EMA5MomentumStrategy(), df, initial_capital=1_000).run()
+    assert r.trades
+    for t in r.trades:
+        assert t.entry_time in df.index
+        assert t.exit_time >= t.entry_time
+    assert any(t.duration_hours > 0 for t in r.trades)
+
+
 def test_enough_trades_with_good_metrics_passes():
     r = _metrics([60.0, -10.0] * 20)             # 40 trades, PF 6, WR 50%
     assert r.total_trades >= config.MIN_BACKTEST_TRADES

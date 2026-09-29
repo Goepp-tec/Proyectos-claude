@@ -103,6 +103,9 @@ class Backtester:
     def __init__(self, strategy: BaseStrategy, df: pd.DataFrame,
                  initial_capital: float = None):
         self.strategy = strategy
+        # Candle timestamps, kept apart: the index is reset for the strategies,
+        # and trades used to be stamped with datetime.utcnow() instead.
+        self.times = list(df.index) if isinstance(df.index, pd.DatetimeIndex) else None
         self.df = df.copy().reset_index(drop=True)
         self.initial_capital = initial_capital or (
             config.INITIAL_CAPITAL / config.MAX_STRATEGIES
@@ -125,7 +128,7 @@ class Backtester:
             close = float(row["close"])
             high  = float(row["high"])
             low   = float(row["low"])
-            ts    = row.name if hasattr(row.name, "isoformat") else datetime.utcnow()
+            ts    = self.times[i] if self.times else datetime.utcnow()
 
             # ── Manage open position ──────────────────────────────────────────
             if position is not None:
@@ -177,7 +180,7 @@ class Backtester:
         # Close any leftover open position at last price
         if position is not None:
             last_close = float(df.iloc[-1]["close"])
-            last_ts    = df.index[-1] if hasattr(df.index[-1], "isoformat") else datetime.utcnow()
+            last_ts    = self.times[-1] if self.times else datetime.utcnow()
             trade = self._close_position(position, last_close, last_ts, "END_OF_DATA", fee_rt)
             trades.append(trade)
             capital += trade.pnl - trade.fees
