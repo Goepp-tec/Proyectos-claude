@@ -5,3 +5,8 @@ __pycache__/
 *.db-wal
 .env
 *.log
+
+# Replay / test-run outputs (reports are copied to evidencias/ when relevant)
+reports/
+data/
+backups/
