@@ -1,0 +1,9 @@
+id,name,is_active,capital,params,backtest_cagr,backtest_win_rate,created_at
+1,EMA5_Momentum,1,963.9277501374359,"{""ema_period"": 5, ""atr_sl_mult"": 1.5, ""atr_tp_mult"": 3.5, ""candle_interval"": ""1d""}",-0.016181302410031795,0.38095238095238093,2026-09-29 01:39:32
+2,DualMA_Crossover,1,1250.0,"{""fast_period"": 100, ""slow_period"": 250, ""atr_sl_mult"": 2.0, ""atr_tp_mult"": 5.0, ""candle_interval"": ""1d""}",0.0,0.0,2026-09-29 01:39:32
+3,Regime_RiskOnOff,1,1250.0,"{""ema_trend"": 200, ""rsi_bull_min"": 50, ""rsi_bear_max"": 50, ""atr_sl_mult"": 2.0, ""atr_tp_mult"": 4.5, ""candle_interval"": ""4h""}",0.03681477584416415,0.37142857142857144,2026-09-29 01:39:32
+4,PriceMomentum_25,1,1250.0,"{""lookback"": 25, ""atr_sl_mult"": 1.5, ""atr_tp_mult"": 4.0, ""candle_interval"": ""1d""}",0.06576411970342866,0.5,2026-09-29 01:39:32
+5,Residual_MeanRev,1,1250.0,"{""reg_window"": 60, ""zscore_window"": 30, ""entry_threshold"": 1.5, ""atr_sl_mult"": 1.8, ""atr_tp_mult"": 3.5, ""candle_interval"": ""4h""}",0.014707607870303008,0.3879310344827586,2026-09-29 01:39:32
+6,Donchian_Breakout,1,1250.0,"{""dc_period"": 15, ""adx_calm_max"": 25, ""atr_sl_mult"": 1.5, ""atr_tp_mult"": 3.5, ""candle_interval"": ""1d""}",-0.03544565702409719,0.21428571428571427,2026-09-29 01:39:32
+7,Blended_MomentumMR,1,1250.0,"{""momentum_period"": 25, ""rsi_oversold"": 38, ""rsi_overbought"": 62, ""bb_period"": 20, ""bb_std"": 2.0, ""atr_sl_mult"": 1.8, ""atr_tp_mult"": 3.8, ""candle_interval"": ""4h""}",-0.010674324035663818,0.32,2026-09-29 01:39:32
+8,BTC_MomentumBreakout,1,1250.0,"{""sma_trend"": 200, ""breakout_lookback"": 20, ""volume_ma_period"": 20, ""volume_mult"": 1.2, ""exit_low_period"": 10, ""sma_exit_period"": 50, ""hard_stop_pct"": 0.08, ""atr_tp_mult"": 3.0, ""atr_sl_mult"": 1.5, ""candle_interval"": ""1d""}",0.015930883351721326,1.0,2026-09-29 01:39:32

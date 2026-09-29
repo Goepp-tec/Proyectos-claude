@@ -1,0 +1,2 @@
+id,strategy_name,symbol,side,entry_price,quantity,stop_loss,take_profit,entry_time,order_id,status,ml_confidence,metadata
+1,EMA5_Momentum,BTCUSDT,SHORT,82822.97053341876,0.00345,86899.05578697608,75568.90316372247,2026-09-29T01:39:34.098499+00:00,PAPER_1_1790645974098,OPEN,0.55,"{""ema5"": 84008.5815535032, ""atr"": 2266.030524650721, ""dist_pct"": 0.006053804791113016}"

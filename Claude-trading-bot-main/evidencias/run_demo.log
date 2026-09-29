@@ -1,0 +1,254 @@
+[32m01:39:25 [INFO    ][0m main — Live trading since: 2026-09-29T01:39:25.182361+00:00[0m
+[32m01:39:25 [INFO    ][0m main — Database initialised[0m
+[32m01:39:26 [INFO    ][0m binance_client — ✓ Binance public API connected. Server time: 2026-09-29 01:39:26 UTC[0m
+[32m01:39:26 [INFO    ][0m binance_client — WebSocket client started[0m
+[32m01:39:26 [INFO    ][0m binance_client — WebSocket enabled for real-time prices[0m
+[32m01:39:26 [INFO    ][0m binance_client — Execution mode: PAPER TRADING (real Binance market data)[0m
+[32m01:39:26 [INFO    ][0m main — =================================================================[0m
+[32m01:39:26 [INFO    ][0m main —    BTC PAPER TRADING BOT  —  Starting up[0m
+[32m01:39:26 [INFO    ][0m main —    Mode      : PAPER TRADING (real Binance data)[0m
+[32m01:39:26 [INFO    ][0m main —    Capital   : $10,000.00[0m
+[32m01:39:26 [INFO    ][0m main —    Symbol    : BTCUSDT[0m
+[32m01:39:26 [INFO    ][0m main —    Backtest  : 500 days of real OHLCV data[0m
+[32m01:39:26 [INFO    ][0m main — =================================================================[0m
+[32m01:39:26 [INFO    ][0m main — Live BTC price: $82,848.07 (-1.24% 24h | vol: 20,595 BTC)[0m
+[32m01:39:26 [INFO    ][0m main — 
+Loading candle data…[0m
+[32m01:39:26 [INFO    ][0m main — 
+Running backtests on 500 days of real Binance data…[0m
+[32m01:39:26 [INFO    ][0m backtester — Running backtests for 8 strategies over 500 days...[0m
+[32m01:39:26 [INFO    ][0m backtester — Fetching 500-day history (1d)...[0m
+[32m01:39:27 [INFO    ][0m binance_client — Fetched 500 1d candles for BTCUSDT (500d history)[0m
+[32m01:39:27 [INFO    ][0m backtester — [✗ FAIL] EMA5_Momentum: CAGR=-1.6% | WinRate=38.1% | PF=0.87 | MaxDD=5.3% | Trades=21[0m
+[32m01:39:27 [INFO    ][0m backtester — [✗ FAIL] DualMA_Crossover: CAGR=0.0% | WinRate=0.0% | PF=0.00 | MaxDD=0.0% | Trades=0[0m
+[32m01:39:27 [INFO    ][0m backtester — Fetching 500-day history (4h)...[0m
+[32m01:39:28 [INFO    ][0m binance_client — Fetched 3000 4h candles for BTCUSDT (500d history)[0m
+[32m01:39:29 [INFO    ][0m backtester — [✗ FAIL] Regime_RiskOnOff: CAGR=3.7% | WinRate=37.1% | PF=1.29 | MaxDD=6.4% | Trades=70[0m
+[32m01:39:29 [INFO    ][0m backtester — [✗ FAIL] PriceMomentum_25: CAGR=6.6% | WinRate=50.0% | PF=3.32 | MaxDD=1.9% | Trades=10[0m
+[32m01:39:32 [INFO    ][0m backtester — [✗ FAIL] Residual_MeanRev: CAGR=1.5% | WinRate=38.8% | PF=1.16 | MaxDD=5.4% | Trades=116[0m
+[32m01:39:32 [INFO    ][0m backtester — [✗ FAIL] Donchian_Breakout: CAGR=-3.5% | WinRate=21.4% | PF=0.58 | MaxDD=8.3% | Trades=14[0m
+[32m01:39:32 [INFO    ][0m backtester — [✗ FAIL] Blended_MomentumMR: CAGR=-1.1% | WinRate=32.0% | PF=0.91 | MaxDD=4.6% | Trades=25[0m
+[33m01:39:32 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:39:32 [INFO    ][0m backtester — [✗ FAIL] BTC_MomentumBreakout: CAGR=1.6% | WinRate=100.0% | PF=3177697028.15 | MaxDD=0.0% | Trades=1[0m
+[33m01:39:32 [WARNING ][0m main —   ✗ EMA5_Momentum         CAGR=-1.6% WR=38.1% PF=0.87[0m
+[33m01:39:32 [WARNING ][0m main —   ✗ DualMA_Crossover      CAGR=0.0% WR=0.0% PF=0.00[0m
+[33m01:39:32 [WARNING ][0m main —   ✗ Regime_RiskOnOff      CAGR=3.7% WR=37.1% PF=1.29[0m
+[33m01:39:32 [WARNING ][0m main —   ✗ PriceMomentum_25      CAGR=6.6% WR=50.0% PF=3.32[0m
+[33m01:39:32 [WARNING ][0m main —   ✗ Residual_MeanRev      CAGR=1.5% WR=38.8% PF=1.16[0m
+[33m01:39:32 [WARNING ][0m main —   ✗ Donchian_Breakout     CAGR=-3.5% WR=21.4% PF=0.58[0m
+[33m01:39:32 [WARNING ][0m main —   ✗ Blended_MomentumMR    CAGR=-1.1% WR=32.0% PF=0.91[0m
+[33m01:39:32 [WARNING ][0m main —   ✗ BTC_MomentumBreakout  CAGR=1.6% WR=100.0% PF=3177697028.15[0m
+[33m01:39:32 [WARNING ][0m main — No strategy passed backtest thresholds. Activating ALL with reduced position sizing.[0m
+[32m01:39:32 [INFO    ][0m main — 
+8/8 strategies active
+[0m
+[32m01:39:32 [INFO    ][0m portfolio_manager —   EMA5_Momentum: $1,250.00 free  ($1,250.00 total, $0.00 committed)[0m
+[32m01:39:32 [INFO    ][0m portfolio_manager —   DualMA_Crossover: $1,250.00 free  ($1,250.00 total, $0.00 committed)[0m
+[32m01:39:32 [INFO    ][0m portfolio_manager —   Regime_RiskOnOff: $1,250.00 free  ($1,250.00 total, $0.00 committed)[0m
+[32m01:39:32 [INFO    ][0m portfolio_manager —   PriceMomentum_25: $1,250.00 free  ($1,250.00 total, $0.00 committed)[0m
+[32m01:39:32 [INFO    ][0m portfolio_manager —   Residual_MeanRev: $1,250.00 free  ($1,250.00 total, $0.00 committed)[0m
+[32m01:39:32 [INFO    ][0m portfolio_manager —   Donchian_Breakout: $1,250.00 free  ($1,250.00 total, $0.00 committed)[0m
+[32m01:39:32 [INFO    ][0m portfolio_manager —   Blended_MomentumMR: $1,250.00 free  ($1,250.00 total, $0.00 committed)[0m
+[32m01:39:32 [INFO    ][0m portfolio_manager —   BTC_MomentumBreakout: $1,250.00 free  ($1,250.00 total, $0.00 committed)[0m
+[32m01:39:32 [INFO    ][0m main — Startup complete. Entering trading loops.
+[0m
+[32m01:39:32 [INFO    ][0m main — [trading] Loop started[0m
+[32m01:39:32 [INFO    ][0m main — Thread started: trading[0m
+[32m01:39:32 [INFO    ][0m main — [positions] Loop started[0m
+[32m01:39:32 [INFO    ][0m main — Thread started: positions[0m
+[32m01:39:32 [INFO    ][0m main — [learning] Loop started[0m
+[32m01:39:32 [INFO    ][0m main — Thread started: learning[0m
+[32m01:39:32 [INFO    ][0m main — [balance] Loop started[0m
+[32m01:39:32 [INFO    ][0m main — Thread started: balance[0m
+[32m01:39:32 [INFO    ][0m main — [dashboard] Starting on http://localhost:8050[0m
+[32m01:39:32 [INFO    ][0m main — Thread started: dashboard[0m
+[32m01:39:32 [INFO    ][0m main — 
+🚀 Bot running. Dashboard: http://localhost:8050
+[0m
+[32m01:39:32 [INFO    ][0m main — [balance] $10,000.00 | Realized: $+0.00 | Unrealized: $+0.00[0m
+Dash is running on http://0.0.0.0:8050/
+
+[32m01:39:33 [INFO    ][0m dash.dash — Dash is running on http://0.0.0.0:8050/
+[0m
+ * Serving Flask app 'dashboard.app'
+ * Debug mode: off
+[32m01:39:33 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$82,848.07[0m
+[32m01:39:33 [INFO    ][0m werkzeug — [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8050
+ * Running on http://192.0.2.2:8050[0m
+[32m01:39:33 [INFO    ][0m werkzeug — [33mPress CTRL+C to quit[0m
+[32m01:39:34 [INFO    ][0m binance_client — 📋 [PAPER TRADE] SELL 0.003450 BTCUSDT @ $82,823.21 (live market=$82,848.07, spread=0.000%, fee=$0.29)[0m
+[32m01:39:34 [INFO    ][0m portfolio_manager — [EMA5_Momentum] OPEN SELL 0.00345 BTC @ $82,822.97 | SL=$86,899.06 TP=$75,568.90 | notional=$286.07[0m
+[32m01:39:34 [INFO    ][0m main — [EMA5_Momentum] ✓ Paper trade opened[0m
+[32m01:39:37 [INFO    ][0m werkzeug — 127.0.0.1 - - [29/Sep/2026 01:39:37] "GET / HTTP/1.1" 200 -[0m
+[32m01:39:37 [INFO    ][0m werkzeug — 127.0.0.1 - - [29/Sep/2026 01:39:37] "GET / HTTP/1.1" 200 -[0m
+[33m01:39:38 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:39:45 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:39:49 [INFO    ][0m werkzeug — 127.0.0.1 - - [29/Sep/2026 01:39:49] "GET / HTTP/1.1" 200 -[0m
+[33m01:39:51 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:39:57 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:40:03 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:40:10 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:40:16 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:40:22 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:40:28 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:40:32 [INFO    ][0m main — [balance] $9,999.58 | Realized: $+0.00 | Unrealized: $-0.09[0m
+[32m01:40:34 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$82,881.04[0m
+[33m01:40:34 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:40:34 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:40:41 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:40:47 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:40:53 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:40:59 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:41:05 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:41:12 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:41:18 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:41:24 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:41:30 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:41:32 [INFO    ][0m main — [balance] $9,999.47 | Realized: $+0.00 | Unrealized: $-0.20[0m
+[32m01:41:35 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$82,912.09[0m
+[33m01:41:35 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:41:36 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:41:43 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:41:49 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:41:49 [INFO    ][0m werkzeug — 127.0.0.1 - - [29/Sep/2026 01:41:49] "GET / HTTP/1.1" 200 -[0m
+[33m01:41:55 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:42:01 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:42:07 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:42:14 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:42:20 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:42:26 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:42:32 [INFO    ][0m main — [balance] $9,999.36 | Realized: $+0.00 | Unrealized: $-0.31[0m
+[33m01:42:32 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:42:36 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$82,956.33[0m
+[33m01:42:36 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:42:39 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:42:45 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:42:51 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:42:57 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:43:03 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:43:09 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:43:16 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:43:22 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:43:25 [INFO    ][0m werkzeug — 127.0.0.1 - - [29/Sep/2026 01:43:25] "GET / HTTP/1.1" 200 -[0m
+[33m01:43:28 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:43:32 [INFO    ][0m main — [balance] $9,999.21 | Realized: $+0.00 | Unrealized: $-0.46[0m
+[33m01:43:34 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:43:37 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$82,941.88[0m
+[33m01:43:37 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:43:41 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:43:47 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:43:49 [INFO    ][0m werkzeug — 127.0.0.1 - - [29/Sep/2026 01:43:49] "GET / HTTP/1.1" 200 -[0m
+[33m01:43:53 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:43:59 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:44:05 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:44:11 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:44:18 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:44:24 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:44:30 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:44:32 [INFO    ][0m main — [balance] $9,999.26 | Realized: $+0.00 | Unrealized: $-0.41[0m
+[33m01:44:36 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:44:37 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$82,955.10[0m
+[33m01:44:37 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:44:42 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:44:49 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:44:55 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:45:01 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:45:07 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:45:14 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:45:20 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:45:26 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:45:32 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:45:32 [INFO    ][0m main — [balance] $9,999.21 | Realized: $+0.00 | Unrealized: $-0.46[0m
+[32m01:45:38 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$83,005.61[0m
+[33m01:45:38 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:45:38 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:45:45 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:45:49 [INFO    ][0m werkzeug — 127.0.0.1 - - [29/Sep/2026 01:45:49] "GET / HTTP/1.1" 200 -[0m
+[33m01:45:51 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:45:57 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:46:03 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:46:09 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:46:16 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:46:22 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:46:28 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:46:32 [INFO    ][0m main — [balance] $9,999.04 | Realized: $+0.00 | Unrealized: $-0.63[0m
+[33m01:46:34 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:46:39 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$83,068.01[0m
+[33m01:46:39 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:46:40 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:46:47 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:46:53 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:46:59 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:47:05 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:47:11 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:47:18 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:47:24 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:47:30 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:47:32 [INFO    ][0m main — [balance] $9,998.82 | Realized: $+0.00 | Unrealized: $-0.85[0m
+[33m01:47:36 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:47:40 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$83,020.51[0m
+[33m01:47:40 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:47:43 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:47:49 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:47:49 [INFO    ][0m werkzeug — 127.0.0.1 - - [29/Sep/2026 01:47:49] "GET / HTTP/1.1" 200 -[0m
+[33m01:47:55 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:48:01 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:48:07 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:48:14 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:48:20 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:48:26 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:48:32 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:48:32 [INFO    ][0m main — [balance] $9,998.99 | Realized: $+0.00 | Unrealized: $-0.68[0m
+[33m01:48:38 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:48:40 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$83,002.68[0m
+[33m01:48:40 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:48:45 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:48:51 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:48:57 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:49:03 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:49:09 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:49:16 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:49:22 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:49:28 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:49:32 [INFO    ][0m main — [balance] $9,999.05 | Realized: $+0.00 | Unrealized: $-0.62[0m
+[33m01:49:34 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:49:41 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:49:41 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$83,001.33[0m
+[33m01:49:41 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:49:47 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:49:49 [INFO    ][0m werkzeug — 127.0.0.1 - - [29/Sep/2026 01:49:49] "GET / HTTP/1.1" 200 -[0m
+[33m01:49:53 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:49:59 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:50:05 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:50:12 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:50:18 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:50:24 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:50:30 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:50:32 [INFO    ][0m main — [balance] $9,999.05 | Realized: $+0.00 | Unrealized: $-0.62[0m
+[33m01:50:37 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:50:42 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$82,956.89[0m
+[33m01:50:42 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:50:43 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:50:49 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:50:55 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:51:01 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:51:08 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:51:14 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:51:20 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:51:26 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:51:32 [INFO    ][0m main — [balance] $9,999.20 | Realized: $+0.00 | Unrealized: $-0.46[0m
+[33m01:51:33 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:51:39 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:51:43 [INFO    ][0m main — [EMA5_Momentum] SIGNAL SELL conf=0.57 ml=0.55 price=$82,922.53[0m
+[33m01:51:43 [WARNING ][0m portfolio_manager — EMA5_Momentum: drawdown limit hit – pausing new entries[0m
+[33m01:51:45 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:51:49 [INFO    ][0m werkzeug — 127.0.0.1 - - [29/Sep/2026 01:51:49] "GET / HTTP/1.1" 200 -[0m
+[33m01:51:51 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:51:57 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:52:04 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[32m01:52:04 [INFO    ][0m werkzeug — 127.0.0.1 - - [29/Sep/2026 01:52:04] "GET / HTTP/1.1" 200 -[0m
+[33m01:52:10 [WARNING ][0m binance_client — WebSocket connection lost: [Errno 104] Connection reset by peer[0m
+[33m01:52:13 [WARNING ][0m main — Signal 15 received — shutting down gracefully…[0m
+[32m01:52:13 [INFO    ][0m main — Shutdown complete.[0m

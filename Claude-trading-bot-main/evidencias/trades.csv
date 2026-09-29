@@ -1,0 +1,1 @@
+id,strategy_name,symbol,side,entry_price,exit_price,quantity,pnl,pnl_pct,fees_paid,entry_time,exit_time,duration_hours,exit_reason,entry_features,closed_at,is_backtest
