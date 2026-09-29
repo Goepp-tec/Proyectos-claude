@@ -17,6 +17,8 @@
 Environment:
   TEST_NAME (7d) · TEST_DURATION_HOURS (168) · TEST_SNAPSHOT_MINUTES (60)
   TEST_EXIT_WHEN_DONE (false) · TEST_REPORT_NAME (REPORTE_7DIAS.txt)
+  TEST_FINISH_NOW="reason"  → one-off: end the running test now (report from
+                              the stored snapshots) and exit
 Outputs go to DATA_DIR/reports/.
 """
 
@@ -262,6 +264,18 @@ class TestRun:
         logger.warning(f"[test {self.name}] FINISHED — report: {path}")
         return path
 
+    def finish_early(self, now: datetime, note: str) -> str:
+        """End the run by hand (bot stopped): report from the stored snapshots."""
+        self.export_daily(now, force=True)
+        learn_book = "observe" if db.get_meta("trading_mode") == "OBSERVE" else "main"
+        path = os.path.join(self.out_dir, self.report_name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"NOTA: prueba terminada antes de tiempo el {now:%Y-%m-%d %H:%M} UTC — {note}\n\n")
+            f.write(self.report(now, learn_book) + "\n")
+        db.set_meta(self._key("finished"), _iso(now))
+        logger.warning(f"[test {self.name}] FINISHED EARLY — report: {path}")
+        return path
+
     def report(self, now: datetime, learn_book: str) -> str:
         L, B = self.book_metrics(learn_book), self.book_metrics("baseline")
         gaps = self.interruptions()
@@ -400,6 +414,13 @@ def main():
 
     bot_main.prepare_database()
     run = TestRun(**run_kwargs)
+    finish_note = os.getenv("TEST_FINISH_NOW", "")
+    if finish_note:   # one-off: close a running test by hand and exit
+        if db.get_meta(run._key("start")) and not run.finished:
+            print(run.finish_early(now(), note=finish_note))
+        else:
+            print(f"[test {name}] nothing to finish (not started or already finished)")
+        return
     state = run.start_or_resume(now())
     if state == "finished":
         logger.warning(f"[test {name}] already finished — not trading")

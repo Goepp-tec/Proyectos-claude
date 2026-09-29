@@ -103,6 +103,17 @@ def test_budget_book_metrics_use_the_budget_and_ignore_budget_changes(run):
     assert [r["capital_base"] for r in total] == [pytest.approx(100.0), pytest.approx(250.0)]
 
 
+def test_finish_early_without_a_running_bot(run):
+    bot = _bot()
+    run.start_or_resume(T0)
+    run.snapshot(T0, bot)
+    db.set_meta("trading_mode", "OBSERVE")
+    path = run.finish_early(T0 + timedelta(days=2), note="cerrada a mano para arrancar la prueba 2")
+    text = open(path, encoding="utf-8").read()
+    assert "cerrada a mano" in text and "APRENDE" in text
+    assert run.finished
+
+
 def test_daily_csv_export(run):
     bot = _bot()
     run.start_or_resume(T0)

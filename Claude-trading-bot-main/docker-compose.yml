@@ -10,8 +10,9 @@ services:
     env_file: .env
     environment:
       - PYTHONUNBUFFERED=1
-      # DB (+ its -wal/-shm files) and log live in the mounted ./data folder.
-      - DATA_DIR=/app/data
+      # DB (+ its -wal/-shm files) and log live in the mounted ./data folder
+      # (or a sub-folder per test run: DATA_SUBDIR=prueba2 in .env).
+      - DATA_DIR=/app/data/${DATA_SUBDIR:-}
     volumes:
       - ./data:/app/data
       - ./models:/app/models
