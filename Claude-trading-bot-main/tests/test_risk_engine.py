@@ -50,6 +50,19 @@ def test_profile_scales_with_aggressiveness():
     assert "EN_PRUEBA" in high["statuses"] and "DESCARTADA" not in high["statuses"]
 
 
+def test_effective_settings_are_persisted_at_startup(temp_db, monkeypatch):
+    """Settings coming from .env must be visible in the DB (dashboard, daily review)."""
+    from risk_engine import RiskSettings
+    monkeypatch.setattr(config, "RISK_BUDGET", 100.0)
+    monkeypatch.setattr(config, "RISK_AGGRESSIVENESS", 3)
+    assert db.get_meta("risk_settings") is None
+    s = RiskSettings.load_and_persist()
+    assert (s.budget, s.aggressiveness) == (100.0, 3)
+    assert db.get_meta("risk_settings") is not None
+    RiskSettings(funds=s.funds, budget=50, aggressiveness=4).save()      # dashboard change wins
+    assert RiskSettings.load_and_persist().budget == 50
+
+
 def test_settings_validation_and_roundtrip(temp_db):
     from risk_engine import RiskSettings
     with pytest.raises(ValueError):

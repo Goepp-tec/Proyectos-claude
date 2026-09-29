@@ -291,7 +291,7 @@ class TradingBot:
 
         # Init portfolio + learning. The learning book trades the risk budget,
         # sized and limited by the risk engine (aggressiveness 1-10).
-        risk_settings = RiskSettings.load()
+        risk_settings = RiskSettings.load_and_persist()
         self.risk = RiskEngine(self.book)
         self.portfolio = make_portfolio(self.client, self.strategies, self.book,
                                         capital_base=risk_settings.budget, risk_engine=self.risk)

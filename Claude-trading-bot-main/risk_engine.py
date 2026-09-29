@@ -76,6 +76,15 @@ class RiskSettings:
             return cls.defaults()
         return cls(**{**asdict(cls.defaults()), **json.loads(raw)})
 
+    @classmethod
+    def load_and_persist(cls) -> "RiskSettings":
+        """Startup: settings from the DB, or the .env defaults written to the DB so
+        the dashboard and the daily review see what is actually in force."""
+        s = cls.load()
+        if not db.get_meta("risk_settings"):
+            s.save()
+        return s
+
     def validate(self):
         if not 1 <= int(self.aggressiveness) <= 10:
             raise ValueError("la agresividad debe estar entre 1 y 10")
