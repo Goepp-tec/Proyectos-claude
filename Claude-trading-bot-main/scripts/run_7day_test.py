@@ -293,6 +293,23 @@ class TestRun:
                 w(f"  {r['ts'][:16]} {r['decision']:<8} {r['strategy_name']} {r['param']} "
                   f"{r['old_value']:g}->{r['new_value']:g}  {r['reason'][:60]}")
         w("")
+        statuses = db.get_all_strategy_status()
+        if statuses:
+            w("Evaluador de estrategias (calificacion actual):")
+            for s in statuses:
+                w(f"  {s['strategy_name']:<22} {s['status']:<12} puntaje {s['score']:.2f}  "
+                  f"{(s['reason'] or '')[:80]}")
+            changes = [e for e in db.get_strategy_evaluations(limit=10**6) if e["ts"] >= since]
+            last = {}
+            moves = []
+            for e in reversed(changes):
+                if last.get(e["strategy_name"]) not in (None, e["status"]):
+                    moves.append(f"  {e['ts'][:16]} {e['strategy_name']}: "
+                                 f"{last[e['strategy_name']]} -> {e['status']}")
+                last[e["strategy_name"]] = e["status"]
+            w(f"  Cambios de estado durante la prueba: {len(moves)}")
+            out.extend(moves)
+            w("")
         w("Criterios de exito (sobre el libro que aprende):")
         for ok, text in checks:
             w(f"  [{'OK' if ok else 'NO'}] {text}")

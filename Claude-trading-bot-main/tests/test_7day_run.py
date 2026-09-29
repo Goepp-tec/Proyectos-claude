@@ -102,10 +102,13 @@ def test_finish_writes_report_and_is_final(run):
     run.snapshot(T0, bot)
     end = run.end
     assert not run.is_over(end - timedelta(minutes=1)) and run.is_over(end)
+    db.upsert_strategy_status("A", "DESCARTADA", 0.0, [], [], "pierde de forma consistente", {})
+    db.record_strategy_evaluation(T0.isoformat(), "A", "DESCARTADA", 0.0, "pierde de forma consistente", {})
     path = run.finish(end, bot)
     text = open(path, encoding="utf-8").read()
     assert os.path.basename(path) == "REPORTE_7DIAS.txt"
-    for s in ("REPORTE", "Interrupciones", "APRENDE", "BASELINE", "Veredicto"):
+    for s in ("REPORTE", "Interrupciones", "APRENDE", "BASELINE", "Veredicto",
+              "Evaluador de estrategias", "DESCARTADA", "pierde de forma consistente"):
         assert s in text
     from scripts.run_7day_test import TestRun
     assert TestRun(name="t", duration_hours=168, snapshot_minutes=60,
