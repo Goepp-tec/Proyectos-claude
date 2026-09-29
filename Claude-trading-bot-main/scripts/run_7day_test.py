@@ -77,6 +77,11 @@ class TestRun:
                 test_name TEXT NOT NULL, down_from TEXT NOT NULL, down_to TEXT NOT NULL,
                 seconds REAL NOT NULL
             )""")
+        # Capital each book (or strategy) was working with at that moment: the
+        # learning book uses the risk budget, which can change from the dashboard.
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(test_snapshots)")]
+        if "capital_base" not in cols:
+            conn.execute("ALTER TABLE test_snapshots ADD COLUMN capital_base REAL")
         conn.commit()
 
     # ─── Schedule ────────────────────────────────────────────────────────────
@@ -149,10 +154,10 @@ class TestRun:
         if getattr(bot, "lab_portfolio", None) is not None:   # same line-up, ungated
             books.append(("lab", bot.lab_portfolio, bot.lab))
         for book, pm, strats in books:
-            totals = dict(equity=0.0, free=0.0, open=0, closed=0, realized=0.0, unreal=0.0)
-            for s in strats:
-                if not s.is_active:
-                    continue
+            active = [s for s in strats if s.is_active]
+            base = pm.capital_base if getattr(pm, "capital_base", None) is not None else config.INITIAL_CAPITAL
+            totals = dict(equity=0.0, free=0.0, open=0, closed=0, realized=0.0, unreal=0.0, base=0.0)
+            for s in active:
                 positions = db.get_open_positions(s.name, book=book)
                 unreal = sum(((price - p["entry_price"]) if p["side"] == "LONG"
                               else (p["entry_price"] - price)) * p["quantity"] for p in positions)
@@ -160,7 +165,8 @@ class TestRun:
                           if (t["closed_at"] or "") >= since]
                 row = dict(equity=pm.strategy_equity(s.name, price), free=pm._capital.get(s.name, 0.0),
                            open=len(positions), closed=len(trades),
-                           realized=sum(t["pnl"] for t in trades), unreal=unreal)
+                           realized=sum(t["pnl"] for t in trades), unreal=unreal,
+                           base=base / max(len(active), 1))
                 self._insert(conn, now, book, s.name, price, row, learning)
                 for k in totals:
                     totals[k] += row[k]
@@ -169,18 +175,22 @@ class TestRun:
         db.set_meta(self._key("last_snapshot"), _iso(now))
 
     def _insert(self, conn, now, book, name, price, row, learning):
-        peak = conn.execute("SELECT MAX(equity) FROM test_snapshots WHERE test_name=? AND book=? "
-                            "AND strategy_name=?", (self.name, book, name)).fetchone()[0]
-        peak = max(peak or row["equity"], row["equity"])
-        dd = (peak - row["equity"]) / peak if peak > 0 else 0.0
+        # Drawdown on P&L (equity - capital base), so a budget change made from
+        # the dashboard is not mistaken for a gain or a loss.
+        pnl = row["equity"] - row["base"]
+        peak = conn.execute("SELECT MAX(equity - capital_base) FROM test_snapshots WHERE test_name=? "
+                            "AND book=? AND strategy_name=? AND capital_base IS NOT NULL",
+                            (self.name, book, name)).fetchone()[0]
+        peak = max(peak or 0.0, pnl, 0.0)
+        dd = (peak - pnl) / row["base"] if row["base"] > 0 else 0.0
         conn.execute("""
             INSERT INTO test_snapshots (test_name, ts, book, strategy_name, price, equity,
                 free_capital, open_positions, closed_trades, realized_pnl, unrealized_pnl,
-                drawdown_pct, learning_applied, learning_rejected, learning_rollback)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                drawdown_pct, learning_applied, learning_rejected, learning_rollback, capital_base)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (self.name, _iso(now), book, name, price, row["equity"], row["free"], row["open"],
               row["closed"], row["realized"], row["unreal"], dd,
-              learning["applied"], learning["rejected"], learning["rollback"]))
+              learning["applied"], learning["rejected"], learning["rollback"], row["base"]))
 
     def snapshots(self) -> list:
         rows = db.get_conn().execute(
@@ -224,13 +234,16 @@ class TestRun:
         pnls = [float(t["pnl"]) for t in trades]
         gross_win = sum(p for p in pnls if p > 0)
         gross_loss = -sum(p for p in pnls if p <= 0)
-        # Each book starts with INITIAL_CAPITAL (the run needs a fresh DATA_DIR); the
-        # first snapshot can already include a position opened at startup.
-        equity_start = config.INITIAL_CAPITAL
-        equity_end = totals[-1]["equity"] if totals else equity_start
+        # A book starts with its capital base (INITIAL_CAPITAL, or the risk budget
+        # for the learning book; the run needs a fresh DATA_DIR). The first snapshot
+        # can already include a position opened at startup, so P&L = equity - base.
+        base_of = lambda r: r["capital_base"] if r.get("capital_base") is not None else config.INITIAL_CAPITAL
+        equity_start = base_of(totals[0]) if totals else config.INITIAL_CAPITAL
+        pnl_end = (totals[-1]["equity"] - base_of(totals[-1])) if totals else 0.0
+        equity_end = equity_start + pnl_end
         return dict(
             equity_start=equity_start, equity_end=equity_end,
-            total_return=equity_end / equity_start - 1 if equity_start else 0.0,
+            total_return=pnl_end / equity_start if equity_start else 0.0,
             max_drawdown=max((r["drawdown_pct"] for r in totals), default=0.0),
             trades=len(pnls),
             profit_factor=(gross_win / gross_loss) if gross_loss > 0 else (math.inf if gross_win > 0 else 0.0),

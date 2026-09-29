@@ -87,6 +87,22 @@ def test_snapshots_include_the_lab_book_when_present(run):
     assert "LAB" in text and "mismo capital" in text
 
 
+def test_budget_book_metrics_use_the_budget_and_ignore_budget_changes(run):
+    bot = _bot()
+    bot.portfolio = PortfolioManager(Mock(), bot.strategies, book="observe", simulate_fills=True,
+                                     capital_base=100.0)
+    run.start_or_resume(T0)
+    run.snapshot(T0, bot)
+    bot.portfolio.set_capital_base(250.0)          # budget raised from the dashboard
+    run.snapshot(T0 + timedelta(hours=1), bot)
+    m = run.book_metrics("observe")
+    assert m["equity_start"] == pytest.approx(100.0)
+    assert m["total_return"] == pytest.approx(0.0, abs=1e-9)
+    assert m["max_drawdown"] == pytest.approx(0.0, abs=1e-9)     # not a 'drop' from 250 to 100
+    total = [r for r in run.snapshots() if r["book"] == "observe" and r["strategy_name"] == "TOTAL"]
+    assert [r["capital_base"] for r in total] == [pytest.approx(100.0), pytest.approx(250.0)]
+
+
 def test_daily_csv_export(run):
     bot = _bot()
     run.start_or_resume(T0)
