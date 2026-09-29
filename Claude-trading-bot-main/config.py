@@ -85,6 +85,29 @@ LEARNING_ROLLBACK_WINDOW_HOURS = _env_num("LEARNING_ROLLBACK_WINDOW_HOURS", 72)
 LEARNING_ROLLBACK_TOLERANCE_PCT = _env_num("LEARNING_ROLLBACK_TOLERANCE_PCT", 0.02)  # of capital
 BASELINE_ML_CONFIDENCE         = 0.55   # frozen baselines use a fixed ML confidence
 
+# ─── Strategy evaluator (strategy_evaluator.py): viability per strategy ──────
+EVAL_ENABLED            = os.getenv("EVAL_ENABLED", "true").lower() == "true"
+EVAL_INTERVAL_HOURS     = _env_num("EVAL_INTERVAL_HOURS", 24)
+EVAL_WINDOWS            = _env_num("EVAL_WINDOWS", 4, int)         # walk-forward windows…
+EVAL_WINDOW_DAYS        = _env_num("EVAL_WINDOW_DAYS", 180, int)   # …of this many days
+EVAL_WARMUP_DAYS        = _env_num("EVAL_WARMUP_DAYS", 300, int)
+# VIABLE: enough trades, profit factor, profitable in most windows, bounded drawdown
+VIABLE_MIN_TRADES       = _env_num("VIABLE_MIN_TRADES", 30, int)
+VIABLE_MIN_PF           = _env_num("VIABLE_MIN_PF", 1.2)
+VIABLE_MIN_WINDOWS      = _env_num("VIABLE_MIN_WINDOWS", 3, int)
+VIABLE_MAX_DRAWDOWN     = _env_num("VIABLE_MAX_DRAWDOWN", 0.15)
+# CONDICIONAL: works in some market regimes only
+COND_MIN_REGIME_TRADES  = _env_num("COND_MIN_REGIME_TRADES", 10, int)
+COND_MIN_REGIME_PF      = _env_num("COND_MIN_REGIME_PF", 1.3)
+# DESCARTADA (value 0, never re-evaluated): strong, consistent evidence only
+DISCARD_MIN_TRADES      = _env_num("DISCARD_MIN_TRADES", 40, int)
+DISCARD_MAX_PF          = _env_num("DISCARD_MAX_PF", 0.9)
+DISCARD_MAX_WINDOWS     = _env_num("DISCARD_MAX_WINDOWS", 1, int)   # profitable windows
+DISCARD_LIVE_MIN_TRADES = _env_num("DISCARD_LIVE_MIN_TRADES", 20, int)
+DISCARD_LIVE_MAX_PF     = _env_num("DISCARD_LIVE_MAX_PF", 0.7)
+SIDE_BLOCK_MIN_TRADES   = 10     # a side (long/short) with >= N trades…
+SIDE_BLOCK_MAX_PF       = 0.9    # …and PF below this is blocked
+
 # Claude API for journal generation (optional — enhances reflection quality)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 

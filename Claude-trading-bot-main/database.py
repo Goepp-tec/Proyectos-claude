@@ -180,6 +180,32 @@ def init_db():
         )
     """)
 
+    # Strategy evaluator: current rating per strategy + history of evaluations.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS strategy_status (
+            strategy_name   TEXT PRIMARY KEY,
+            status          TEXT NOT NULL,       -- VIABLE / CONDICIONAL / EN_PRUEBA / DESCARTADA
+            score           REAL NOT NULL,       -- 0..1 (0 = discarded)
+            allowed_regimes TEXT DEFAULT '[]',   -- JSON
+            allowed_sides   TEXT DEFAULT '[]',   -- JSON
+            reason          TEXT,
+            metrics         TEXT DEFAULT '{}',   -- JSON
+            updated_at      TEXT,
+            discarded_at    TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS strategy_evaluations (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts              TEXT NOT NULL,
+            strategy_name   TEXT NOT NULL,
+            status          TEXT NOT NULL,
+            score           REAL NOT NULL,
+            reason          TEXT,
+            metrics         TEXT DEFAULT '{}'
+        )
+    """)
+
     # Paper "books": 'main' (what the bot trades), 'observe' (observation-mode
     # theoretical trades), 'baseline' (frozen-parameter shadow copies).
     for table in ("positions", "trades", "balance_history"):
@@ -336,6 +362,67 @@ def mark_learning_change_evaluated(audit_id: int):
     conn = get_conn()
     conn.execute("UPDATE learning_audit SET evaluated=1 WHERE id=?", (audit_id,))
     conn.commit()
+
+
+def _status_row(row) -> Optional[Dict]:
+    if not row:
+        return None
+    d = dict(row)
+    for k in ("allowed_regimes", "allowed_sides", "metrics"):
+        d[k] = json.loads(d.get(k) or ("{}" if k == "metrics" else "[]"))
+    return d
+
+
+def upsert_strategy_status(strategy_name: str, status: str, score: float,
+                           allowed_regimes: list, allowed_sides: list, reason: str,
+                           metrics: dict, ts: str = None):
+    ts = ts or utc_now_iso()
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO strategy_status (strategy_name, status, score, allowed_regimes,
+            allowed_sides, reason, metrics, updated_at, discarded_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(strategy_name) DO UPDATE SET
+            status=excluded.status, score=excluded.score,
+            allowed_regimes=excluded.allowed_regimes, allowed_sides=excluded.allowed_sides,
+            reason=excluded.reason, metrics=excluded.metrics, updated_at=excluded.updated_at,
+            discarded_at=COALESCE(strategy_status.discarded_at, excluded.discarded_at)
+    """, (strategy_name, status, score, json.dumps(allowed_regimes), json.dumps(allowed_sides),
+          reason, json.dumps(metrics), ts, ts if status == "DESCARTADA" else None))
+    conn.commit()
+
+
+def get_strategy_status(strategy_name: str) -> Optional[Dict]:
+    return _status_row(get_conn().execute(
+        "SELECT * FROM strategy_status WHERE strategy_name=?", (strategy_name,)).fetchone())
+
+
+def get_all_strategy_status() -> List[Dict]:
+    rows = get_conn().execute("SELECT * FROM strategy_status ORDER BY score DESC").fetchall()
+    return [_status_row(r) for r in rows]
+
+
+def record_strategy_evaluation(ts: str, strategy_name: str, status: str, score: float,
+                               reason: str, metrics: dict):
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO strategy_evaluations (ts, strategy_name, status, score, reason, metrics)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (ts, strategy_name, status, score, reason, json.dumps(metrics)))
+    conn.commit()
+
+
+def get_strategy_evaluations(strategy_name: str = None, limit: int = 500) -> List[Dict]:
+    where, params = ("WHERE strategy_name=?", (strategy_name,)) if strategy_name else ("", ())
+    rows = get_conn().execute(
+        f"SELECT * FROM strategy_evaluations {where} ORDER BY id DESC LIMIT ?", params + (limit,)
+    ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["metrics"] = json.loads(d.get("metrics") or "{}")
+        result.append(d)
+    return result
 
 
 def count_trades_since(strategy_name: str, since_iso: str, book: str) -> int:
