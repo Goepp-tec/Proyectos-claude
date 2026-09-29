@@ -148,6 +148,20 @@ def update_header(_):
     return now, html.Span(mode, style={"color": color, "marginLeft": "12px"})
 
 
+_price_fetcher = None
+
+
+def _get_price_fetcher():
+    """One REST price reader for the dashboard. Building a BinanceClient on every
+    refresh used to ping Binance twice and start a WebSocket thread that was
+    never stopped (one leaked connection every 10 s while the page was open)."""
+    global _price_fetcher
+    if _price_fetcher is None:
+        import binance_client
+        _price_fetcher = binance_client.BinancePublicDataFetcher()
+    return _price_fetcher
+
+
 @app.callback(
     Output("kpi-row", "children"),
     Output("store-balance", "data"),
@@ -161,9 +175,7 @@ def update_kpis(_):
     # Compute unrealized P&L LIVE from current open positions + latest price
     # (don't trust stale DB values that may be minutes old)
     try:
-        from binance_client import BinanceClient
-        client = BinanceClient()
-        current_price = client.get_current_price(config.SYMBOL)
+        current_price = _get_price_fetcher().get_current_price(config.SYMBOL)
         unreal = 0.0
         for pos in db.get_open_positions():
             ep = float(pos["entry_price"])
