@@ -159,7 +159,9 @@ def test_kill_switch_stops_entries_until_reset(setup):
     assert not ok and "freno" in why
     risk.reset_kill_switch()
     risk.status(pm, crash)
-    assert risk.check_entry(pm.strategies["S1"], _sig(price=crash), crash, 0.7, pm)[0]
+    # aggressiveness 1 allows one position per side and a long is still open: test a short
+    ok, why, _ = risk.check_entry(pm.strategies["S1"], _sig(SignalType.SELL, price=crash), crash, 0.7, pm)
+    assert ok, why
 
 
 def test_close_all_request_closes_every_position(setup):
@@ -188,3 +190,18 @@ def test_aggressiveness_decides_which_ratings_may_trade(temp_db):
     assert ev.can_trade(Toy(), SignalType.BUY, df, profile(9)["statuses"])[0]
     db.upsert_strategy_status("Toy", "DESCARTADA", 0.0, [], [], "x", {})
     assert not ev.can_trade(Toy(), SignalType.BUY, df, profile(10)["statuses"])[0]
+
+
+def test_correlated_positions_are_capped_per_direction(setup):
+    """Crypto coins move together: in a replay four shorts opened into the same rally
+    and all lost. At most half of the open positions may point the same way."""
+    from risk_engine import profile
+    assert profile(3)["max_same_side"] == 2 and profile(10)["max_same_side"] == 4
+    make, _ = setup
+    risk, pm = make(aggr=3, budget=100.0, n=4)
+    for i in range(2):
+        assert pm.process_signal(pm.strategies[f"S{i}"], _sig(stop_pct=0.05), PRICE, 0.7)
+    ok, why, _ = risk.check_entry(pm.strategies["S2"], _sig(stop_pct=0.05), PRICE, 0.7, pm)
+    assert not ok and "mismo lado" in why and "LARGO" in why
+    ok, why, _ = risk.check_entry(pm.strategies["S2"], _sig(SignalType.SELL, stop_pct=0.05), PRICE, 0.7, pm)
+    assert ok, why                                              # the other side is still free

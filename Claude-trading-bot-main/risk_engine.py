@@ -11,6 +11,9 @@ Applies to the book the bot actually trades (the learning book):
     kill switch, minimum signal confidence, which evaluator ratings may
     trade (1-3 VIABLE; 4-7 + CONDICIONAL; 8-10 + EN_PRUEBA; never DESCARTADA)
     and the net confirmations required (1-3: 2; 4-7: 1; 8-10: 0 — confirmations.py)
+  • correlation: at most half of the open positions (rounded up) on the same
+    side — crypto coins move together, so several longs (or shorts) at once
+    are one big bet, not diversification
   • mode        : 'trade' or 'close_only' (no new entries, positions run to
                   their stop-loss / take-profit)
   • allow_short : paper shorts on/off (real spot trading cannot short)
@@ -25,6 +28,7 @@ dashboard while the bot runs. Paper trading only.
 """
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Callable, Optional, Tuple
@@ -47,6 +51,7 @@ def profile(level: int) -> dict:
     t = (level - 1) / 9
     p = {k: _LOW[k] + t * (_HIGH[k] - _LOW[k]) for k in _LOW}
     p["max_open"] = int(round(p["max_open"]))
+    p["max_same_side"] = max(1, math.ceil(p["max_open"] / 2))
     if level <= 3:
         p["statuses"], p["min_confirmations"] = ("VIABLE",), 2
     elif level <= 7:
@@ -150,6 +155,8 @@ class RiskEngine:
                     drawdown=drawdown, max_drawdown_usd=max_dd, kill_switch=kill is not None,
                     kill_reason=(kill or {}).get("reason", ""), exposure=exposure,
                     exposure_limit=prof["max_exposure"] * s.budget, open_positions=len(positions),
+                    long_positions=sum(p["side"] == "LONG" for p in positions),
+                    short_positions=sum(p["side"] == "SHORT" for p in positions),
                     close_only=s.mode == "close_only" or kill is not None)
 
     def reset_kill_switch(self):
@@ -191,6 +198,11 @@ class RiskEngine:
             return False, f"riesgo: confianza ML {ml_confidence:.2f} baja", 0.0
         if st["open_positions"] >= prof["max_open"]:
             return False, f"riesgo: maximo de {prof['max_open']} posiciones abiertas", 0.0
+        same = st["long_positions"] if signal.type == SignalType.BUY else st["short_positions"]
+        if same >= prof["max_same_side"]:
+            side = "LARGO" if signal.type == SignalType.BUY else "CORTO"
+            return False, (f"riesgo: ya hay {same} posiciones en {side} (maximo {prof['max_same_side']} "
+                           f"del mismo lado: las criptos se mueven juntas)"), 0.0
 
         stop = signal.stop_loss
         stop_pct = abs(price - stop) / price if stop else config.DEFAULT_STOP_LOSS_PCT
