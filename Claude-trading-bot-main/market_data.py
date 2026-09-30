@@ -76,12 +76,17 @@ COT_METRICS = ("cot_am_net", "cot_lev_net")
 CFTC_CODES = {"BTC": "133741", "ETH": "146021"}
 COT_RELEASE_DELAY = pd.Timedelta(days=3, hours=21)   # Tue report -> Fri 15:30 New York
 
+# News / fundamentals collected by news_data.py (stored in the same table)
+NEWS_METRICS = ("news_tone", "news_count", "stable_supply")
+GLOBAL_METRICS = ("fng", "stable_supply")      # market-wide: stored under symbol 'ALL'
 METRICS = (tuple(RATIO_ENDPOINTS) + ("funding_rate", "fng") + tuple(OKX_ENDPOINTS)
-           + HL_METRICS + COT_METRICS)
+           + HL_METRICS + COT_METRICS + NEWS_METRICS)
 # How long a published value stays valid for a candle (no stale carry-forward)
 TOLERANCE = {**{m: pd.Timedelta(hours=6) for m in tuple(RATIO_ENDPOINTS) + tuple(OKX_ENDPOINTS)},
              **{m: pd.Timedelta(hours=3) for m in HL_METRICS},
              **{m: pd.Timedelta(days=12) for m in COT_METRICS},
+             "news_tone": pd.Timedelta(hours=3), "news_count": pd.Timedelta(hours=3),
+             "stable_supply": pd.Timedelta(days=3),
              "funding_rate": pd.Timedelta(hours=16), "fng": pd.Timedelta(days=2)}
 INTERVAL = {"1h": pd.Timedelta(hours=1), "4h": pd.Timedelta(hours=4), "1d": pd.Timedelta(days=1)}
 
@@ -112,7 +117,7 @@ def _store(symbol: str, metric: str, rows) -> int:
 
 
 def load_series(symbol: str, metric: str) -> pd.Series:
-    sym = "ALL" if metric == "fng" else symbol       # Fear & Greed is market-wide
+    sym = "ALL" if metric in GLOBAL_METRICS else symbol   # Fear & Greed, stablecoins: market-wide
     rows = db.get_conn().execute(
         "SELECT ts, value FROM market_data WHERE symbol=? AND metric=? ORDER BY ts", (sym, metric)
     ).fetchall()

@@ -95,11 +95,11 @@ def _fake_http(calls=None, okx_hours=3):
 
 
 def test_update_stores_every_metric_once(temp_db):
-    from market_data import METRICS, MarketDataCollector
+    from market_data import METRICS, NEWS_METRICS, MarketDataCollector
     col = MarketDataCollector("BTCUSDT", http=_fake_http(), clock=lambda: T0)
     col.update(force=True)
     col.update(force=True)                                    # idempotent: no duplicates
-    for metric in METRICS:
+    for metric in set(METRICS) - set(NEWS_METRICS):          # news: news_data.NewsCollector
         s = col.series(metric)
         assert len(s) > 0, metric
         assert not s.index.duplicated().any(), metric

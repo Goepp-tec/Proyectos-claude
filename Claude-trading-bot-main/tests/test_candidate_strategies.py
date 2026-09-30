@@ -40,6 +40,9 @@ def _prices(n=900, seed=11, freq="4h"):
     week = t // 7                                       # COT is weekly: a step series
     df["cot_am_net"] = 0.15 + 0.1 * np.sin(week / 6)
     df["cot_lev_net"] = -0.3 + 0.1 * np.cos(week / 6)
+    df["news_tone"] = 0.3 * np.sin(t / 11)
+    df["news_count"] = 4.0
+    df["stable_supply"] = 250e9 * (1 + 0.001 * t)
     return df
 
 
