@@ -246,3 +246,37 @@ def test_main_views_follow_the_learning_book_in_observation_mode(temp_db):
     assert "RSI_Bollinger@XRP" in positions
     assert "Breakout@SOL" in _dump(dash_app._render_history())
     assert "Breakout@SOL" in _dump(dash_app._render_strategies())
+
+
+def test_learning_tab_compares_books_in_percent_not_dollars(temp_db, monkeypatch):
+    """Aprende trades the $100 budget, lab / baseline $1,000 per coin: '$100 vs
+    $4,999.96 = -$4,899.96' looked like a huge loss when nothing was lost."""
+    import config
+    from dashboard import app as dash_app
+    from risk_engine import RiskSettings
+    monkeypatch.setattr(config, "INITIAL_CAPITAL", 1_000.0)
+    monkeypatch.setattr(config, "SYMBOLS", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"])
+    RiskSettings(funds=1_000, budget=100, aggressiveness=3).save()
+    db.set_meta("trading_mode", "OBSERVE")
+    db.record_balance(100.5, 0.5, 0, {}, book="observe")
+    db.record_balance(4_999.96, 0, -0.04, {}, book="baseline")
+    db.record_balance(5_010.0, 10.0, 0, {}, book="lab")
+    out = _dump(dash_app._render_learning())
+    assert "+0.50%" in out and "+0.20%" in out and "-0.00%" in out     # aprende, lab, baseline
+    assert "-4,899" not in out and "+0.50 pts" in out
+    assert "$100.50 de $100" in out and "$4,999.96 de $5,000" in out
+
+
+def test_the_bot_records_the_lab_balance_too(temp_db):
+    from unittest.mock import Mock
+    import main
+    bot = main.TradingBot.__new__(main.TradingBot)
+    bot.book, bot._prices, bot._current_price = "observe", {"BTCUSDT": 50_000.0}, 50_000.0
+    for attr, book in (("portfolio", "observe"), ("baseline_portfolio", "baseline"), ("lab_portfolio", "lab")):
+        pm = Mock()
+        pm.total_balance.return_value = {"total_balance": 1.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0,
+                                         "breakdown": {}}
+        setattr(bot, attr, pm)
+    bot._record_balances()
+    for book in ("observe", "baseline", "lab"):
+        assert db.get_latest_balance(book=book) is not None, book

@@ -586,33 +586,37 @@ class TradingBot:
         logger.info("[balance] Loop started")
         while not _shutdown.is_set():
             try:
-                price = self.prices()
-                if price and self.portfolio:
-                    bal = self.portfolio.total_balance(price)
-                    db.record_balance(
-                        total_balance=bal["total_balance"],
-                        realized_pnl=bal["realized_pnl"],
-                        unrealized_pnl=bal["unrealized_pnl"],
-                        strategy_breakdown=bal.get("breakdown", {}),
-                        book=self.book,
-                    )
-                    base = self.baseline_portfolio.total_balance(price)
-                    db.record_balance(
-                        total_balance=base["total_balance"],
-                        realized_pnl=base["realized_pnl"],
-                        unrealized_pnl=base["unrealized_pnl"],
-                        strategy_breakdown=base.get("breakdown", {}),
-                        book="baseline",
-                    )
-                    logger.info(
-                        f"[balance:{self.book}] ${bal['total_balance']:,.2f} | "
-                        f"Realized: ${bal['realized_pnl']:+,.2f} | "
-                        f"Unrealized: ${bal['unrealized_pnl']:+,.2f} || "
-                        f"baseline ${base['total_balance']:,.2f}"
-                    )
+                self._record_balances()
             except Exception as e:
                 logger.error(f"[balance] Error: {e}", exc_info=True)
             _shutdown.wait(timeout=60)  # Update balance every 60 seconds (not every 5 min)
+
+    def _record_balances(self):
+        """Equity snapshot of the learning, baseline and lab books (dashboard curves)."""
+        price = self.prices()
+        if not price or not self.portfolio:
+            return
+        bals = {}
+        for book, pm in ((self.book, self.portfolio), ("baseline", self.baseline_portfolio),
+                         ("lab", getattr(self, "lab_portfolio", None))):
+            if pm is None:
+                continue
+            bal = pm.total_balance(price)
+            db.record_balance(
+                total_balance=bal["total_balance"],
+                realized_pnl=bal["realized_pnl"],
+                unrealized_pnl=bal["unrealized_pnl"],
+                strategy_breakdown=bal.get("breakdown", {}),
+                book=book,
+            )
+            bals[book] = bal
+        learn = bals[self.book]
+        logger.info(
+            f"[balance:{self.book}] ${learn['total_balance']:,.2f} | "
+            f"Realized: ${learn['realized_pnl']:+,.2f} | "
+            f"Unrealized: ${learn['unrealized_pnl']:+,.2f} || "
+            + " | ".join(f"{b} ${v['total_balance']:,.2f}" for b, v in bals.items() if b != self.book)
+        )
 
     # ─── Dashboard ────────────────────────────────────────────────────────────
 

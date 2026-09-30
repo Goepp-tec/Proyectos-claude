@@ -734,8 +734,15 @@ def _render_learning():
     learner_book = "observe" if trading_mode == "OBSERVE" else "main"
     learn_bal = db.get_latest_balance(book=learner_book) or {}
     base_bal  = db.get_latest_balance(book="baseline") or {}
-    learn_eq  = learn_bal.get("total_balance", config.INITIAL_CAPITAL)
-    base_eq   = base_bal.get("total_balance", config.INITIAL_CAPITAL)
+    # Each book on its own capital: aprende = risk budget, lab / baseline =
+    # INITIAL_CAPITAL per coin. Compare returns in %, never dollars.
+    from risk_engine import RiskSettings
+    fund_base = config.INITIAL_CAPITAL * len(config.SYMBOLS)
+    books = [(learner_book, "Aprende", RiskSettings.load().budget, COLORS["blue"]),
+             ("lab", "Lab (sin filtro)", fund_base, COLORS["purple"]),
+             ("baseline", "Baseline (congelado)", fund_base, COLORS["subtext"])]
+    equity = {b: (db.get_latest_balance(book=b) or {}).get("total_balance", base) for b, _, base, _ in books}
+    ret = {b: (equity[b] - base) / base if base else 0.0 for b, _, base, _ in books}
     audit     = db.get_learning_audit(limit=300)
     counts    = {d: sum(1 for r in audit if r["decision"] == d)
                  for d in ("applied", "rejected", "rollback")}
@@ -743,38 +750,39 @@ def _render_learning():
     notice = None
     if trading_mode == "OBSERVE":
         notice = dbc.Alert(
-            "Modo OBSERVACIÓN: ninguna estrategia pasó el backtest, así que no se abren "
-            "posiciones en el libro principal. Las operaciones de abajo son teóricas "
-            "(libro 'observe'). Para operar igualmente: ALLOW_UNVALIDATED_STRATEGIES=true.",
-            color="warning", style={"fontSize": "13px"})
+            "Modo OBSERVACIÓN: la versión que aprende opera en el libro 'observe' con precios reales "
+            "y órdenes simuladas (todo este bot es paper trading). Solo opera lo que aprueban el "
+            "evaluador y las confirmaciones. Cada libro se mide en % de su propio capital: aprende "
+            "usa el presupuesto; lab y baseline, los fondos por cripto.",
+            color="secondary", style={"fontSize": "13px"})
 
-    diff = learn_eq - base_eq
+    diff = ret[learner_book] - ret["baseline"]
+    book_cards = [
+        dbc.Col(_metric_card(label, f"{ret[b]:+.2%}", "green" if ret[b] >= 0 else "red",
+                             subtitle=f"${equity[b]:,.2f} de ${base:,.0f}"), width=2)
+        for b, label, base, _ in books]
     cards = dbc.Row([
         dbc.Col(_metric_card("Modo", trading_mode, "yellow",
                              subtitle=f"libro que aprende: {learner_book}"), width=2),
-        dbc.Col(_metric_card("Equity: aprende", f"${learn_eq:,.2f}",
-                             "green" if learn_eq >= config.INITIAL_CAPITAL else "red"), width=2),
-        dbc.Col(_metric_card("Equity: baseline", f"${base_eq:,.2f}",
-                             "green" if base_eq >= config.INITIAL_CAPITAL else "red",
-                             subtitle="parámetros congelados"), width=2),
-        dbc.Col(_metric_card("Aprende − baseline", f"${diff:+,.2f}",
-                             "green" if diff >= 0 else "red"), width=2),
+        *book_cards,
+        dbc.Col(_metric_card("Aprende − baseline", f"{diff * 100:+.2f} pts", "green" if diff >= 0 else "red",
+                             subtitle="diferencia de retornos"), width=2),
         dbc.Col(_metric_card("Ajustes aplicados", str(counts["applied"]), "blue",
                              subtitle=f"{counts['rollback']} revertidos"), width=2),
         dbc.Col(_metric_card("Propuestas rechazadas", str(counts["rejected"]), "subtext"), width=2),
     ], className="g-2 mb-3")
 
     fig = go.Figure()
-    for book, label, color in ((learner_book, "Aprende", COLORS["blue"]),
-                               ("baseline", "Baseline (congelado)", COLORS["subtext"])):
+    for book, label, base, color in books:
         hist = db.get_balance_history(days=90, include_backtest=True, book=book)
-        if hist:
+        if hist and base:
             df = pd.DataFrame(hist)
-            fig.add_trace(go.Scatter(x=df["recorded_at"], y=df["total_balance"],
+            fig.add_trace(go.Scatter(x=df["recorded_at"], y=(df["total_balance"] / base - 1) * 100,
                                      name=label, line=dict(color=color, width=2)))
     if fig.data:
-        fig.add_hline(y=config.INITIAL_CAPITAL, line_dash="dot", line_color=COLORS["border"])
-        fig.update_layout(**_dark_layout("Equity: aprende vs baseline"), height=300)
+        fig.add_hline(y=0, line_dash="dot", line_color=COLORS["border"])
+        fig.update_layout(**_dark_layout("Retorno %: aprende vs lab vs baseline (cada uno sobre su capital)"),
+                          height=300, yaxis_ticksuffix="%")
     else:
         fig = _empty_fig("Sin historial de equity todavía")
 
