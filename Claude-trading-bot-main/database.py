@@ -718,10 +718,12 @@ def get_balance_history(days: int = 30, include_backtest: bool = False,
     live_since = None if include_backtest else get_live_since()
     
     if live_since:
-        # Filter to only include data from live trading start
+        # Filter to only include data from live trading start. Compare as dates:
+        # recorded_at is 'YYYY-MM-DD HH:MM:SS' and live_since ISO with a 'T', so a
+        # text comparison hid every row of the first day.
         rows = conn.execute("""
             SELECT * FROM balance_history
-            WHERE recorded_at >= ? AND book=?
+            WHERE datetime(recorded_at) >= datetime(?) AND book=?
             ORDER BY recorded_at ASC
         """, (live_since, book)).fetchall()
     else:
