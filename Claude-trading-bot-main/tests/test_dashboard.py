@@ -217,3 +217,32 @@ def test_learning_tab_shows_recent_decisions_and_claude_views(temp_db):
     out = _dump(dash_app._render_learning())
     assert "Decisiones recientes" in out and "Supertrend@SOL" in out and "Solana DEX exploited" in out
     assert "Revisión de Claude" in out and "exploit reciente" in out and "bloquear" in out
+
+
+def test_main_views_follow_the_learning_book_in_observation_mode(temp_db):
+    """In OBSERVE mode the learning book is 'observe': the first tab and the KPI row
+    showed the empty 'main' book ($1,000, no history, no strategies) forever."""
+    import binance_client
+    from dashboard import app as dash_app
+    from risk_engine import RiskSettings
+    RiskSettings(funds=1_000, budget=100, aggressiveness=3).save()
+    db.set_meta("trading_mode", "OBSERVE")
+    db.record_balance(101.5, 1.5, 0.0, {"Breakout@SOL": {"capital": 101.5}}, book="observe")
+    db.record_trade(strategy_name="Breakout@SOL", symbol="SOLUSDT", side="LONG", entry_price=150.0,
+                    exit_price=153.0, quantity=0.5, pnl=1.5, pnl_pct=0.02, fees_paid=0.15,
+                    entry_time="2026-09-30T04:00:00+00:00", exit_time="2026-09-30T06:00:00+00:00",
+                    duration_hours=2.0, exit_reason="TAKE_PROFIT", entry_features={}, book="observe",
+                    closed_at="2026-09-30T06:00:00+00:00")
+    db.open_position(strategy_name="RSI_Bollinger@XRP", symbol="XRPUSDT", side="LONG", entry_price=0.5,
+                     quantity=20.0, stop_loss=0.45, take_profit=0.6, order_id="x", ml_confidence=0.6,
+                     metadata={}, book="observe", entry_time="2026-09-30T07:00:00+00:00")
+    dash_app._price_fetcher = None
+    with patch.object(binance_client, "BinancePublicDataFetcher") as fetcher:
+        fetcher.return_value.get_current_price.side_effect = lambda sym: {"XRPUSDT": 0.52}.get(sym, 1.0)
+        kpis = _dump(dash_app.update_kpis(0)[0])
+        positions = _dump(dash_app._render_positions())
+    assert "101.50" in kpis and "+1.50" in kpis and "$100" in kpis     # budget, not the $1,000 funds
+    assert "No balance history" not in _dump(dash_app._render_overview())
+    assert "RSI_Bollinger@XRP" in positions
+    assert "Breakout@SOL" in _dump(dash_app._render_history())
+    assert "Breakout@SOL" in _dump(dash_app._render_strategies())

@@ -189,6 +189,14 @@ def _live_prices() -> dict:
     return dict(_prices_cache["prices"])
 
 
+def _book_view():
+    """(book, capital) the main views show: the learning book ('observe' in
+    observation mode, else 'main') on its risk budget. Showing the 'main' book
+    in observation mode left the first tab empty ($1,000, no history) forever."""
+    from risk_engine import RiskSettings
+    return _learner_book(), RiskSettings.load().budget
+
+
 def _symbol_of_name(name: str) -> str:
     """'EMA5_Momentum@ETH' -> 'ETHUSDT'; no suffix = the primary symbol."""
     return f"{name.split('@', 1)[1]}USDT" if "@" in name else config.SYMBOL
@@ -209,24 +217,26 @@ def _unrealized(pos: dict, prices: dict):
     Input("interval-refresh", "n_intervals"),
 )
 def update_kpis(_):
-    bal  = db.get_latest_balance() or {}
-    total   = bal.get("total_balance", config.INITIAL_CAPITAL)
+    book, base = _book_view()
+    bal  = db.get_latest_balance(book=book) or {}
+    total   = bal.get("total_balance", base)
+    positions = db.get_open_positions(book=book)
     real    = bal.get("realized_pnl", 0.0)
 
     # Compute unrealized P&L LIVE from current open positions + latest price
     # (don't trust stale DB values that may be minutes old)
     try:
         prices = _live_prices()
-        unreal = sum(u for pos in db.get_open_positions()
+        unreal = sum(u for pos in positions
                      for u in [_unrealized(pos, prices)] if u is not None)
     except Exception:
         # Fallback to DB value if live calculation fails
         unreal = bal.get("unrealized_pnl", 0.0)
 
     total_pnl = real + unreal
-    pct_chg   = (total_pnl / config.INITIAL_CAPITAL) * 100 if config.INITIAL_CAPITAL else 0
+    pct_chg   = (total_pnl / base) * 100 if base else 0
 
-    stats   = db.get_trade_stats(include_backtest=config.SHOW_BACKTEST_DATA)
+    stats   = db.get_trade_stats(include_backtest=config.SHOW_BACKTEST_DATA, book=book)
     wins    = int(stats.get("wins") or 0)
     total_t = int(stats.get("total_trades") or 0)
     wr_str  = f"{wins}/{total_t}" if total_t > 0 else "0/0"
@@ -234,7 +244,8 @@ def update_kpis(_):
 
     cards = [
         dbc.Col(_metric_card("Total Balance", f"${total:,.2f}",
-                             "green" if total >= config.INITIAL_CAPITAL else "red"), width=2),
+                             "green" if total >= base else "red",
+                             subtitle=f"libro '{book}' (presupuesto)"), width=2),
         dbc.Col(_metric_card("Unrealized P&L", f"${unreal:+,.2f}",
                              "green" if unreal >= 0 else "red",
                              subtitle="Open positions"), width=2),
@@ -243,11 +254,11 @@ def update_kpis(_):
                              subtitle="Closed trades"), width=2),
         dbc.Col(_metric_card("Total Return", f"{pct_chg:+.2f}%",
                              "green" if pct_chg >= 0 else "red",
-                             subtitle=f"from ${config.INITIAL_CAPITAL:,.0f}"), width=2),
+                             subtitle=f"from ${base:,.0f}"), width=2),
         dbc.Col(_metric_card("Win Rate", f"{wr_pct*100:.1f}%",
                              "green" if wr_pct >= 0.5 else "yellow",
                              subtitle=f"{wr_str} trades"), width=2),
-        dbc.Col(_metric_card("Open Positions", str(len(db.get_open_positions())),
+        dbc.Col(_metric_card("Open Positions", str(len(positions)),
                              color="blue"), width=2),
     ]
     
@@ -318,8 +329,9 @@ def _tab_content(active_tab):
 # ─── Tab renderers ────────────────────────────────────────────────────────────
 
 def _render_overview():
-    # Get balance history - filter out backtest data based on config
-    history = db.get_balance_history(days=90, include_backtest=config.SHOW_BACKTEST_DATA)
+    # Balance history of the learning book - filter out backtest data based on config
+    book, base = _book_view()
+    history = db.get_balance_history(days=90, include_backtest=config.SHOW_BACKTEST_DATA, book=book)
     if history:
         df = pd.DataFrame(history)
         fig = go.Figure()
@@ -329,8 +341,8 @@ def _render_overview():
             line=dict(color=COLORS["blue"], width=2),
             fillcolor="rgba(88,166,255,0.12)",
         ))
-        fig.add_hline(y=config.INITIAL_CAPITAL, line_dash="dot",
-                      line_color=COLORS["subtext"], annotation_text="Initial Capital")
+        fig.add_hline(y=base, line_dash="dot",
+                      line_color=COLORS["subtext"], annotation_text="Presupuesto")
         fig.update_layout(**_dark_layout("Portfolio Equity Curve"), height=320)
 
         # Drawdown
@@ -350,19 +362,17 @@ def _render_overview():
         fig    = _empty_fig("No balance history yet. Waiting for first data point.")
         fig_dd = _empty_fig("No drawdown data")
 
-    # Strategy allocation pie
-    active = db.get_active_strategies()
-    if active:
-        names  = [s["name"] for s in active]
-        caps   = [s.get("capital", config.INITIAL_CAPITAL / config.MAX_STRATEGIES) for s in active]
-        fig_pie = go.Figure(go.Pie(
-            labels=names, values=caps, hole=0.5,
-            marker=dict(colors=STRATEGY_PALETTE[:len(names)]),
-        ))
-        fig_pie.update_layout(**_dark_layout("Capital Allocation"), height=260,
-                              showlegend=True)
-    else:
-        fig_pie = _empty_fig("No active strategies")
+    # Where the budget is: open exposure per coin, and what is still free
+    exposure = {}
+    for p in db.get_open_positions(book=book):
+        coin = coin_of(p.get("symbol") or config.SYMBOL)
+        exposure[coin] = exposure.get(coin, 0.0) + float(p["entry_price"]) * float(p["quantity"])
+    free = max(base - sum(exposure.values()), 0.0)
+    fig_pie = go.Figure(go.Pie(
+        labels=list(exposure) + ["Libre"], values=list(exposure.values()) + [free], hole=0.5,
+        marker=dict(colors=STRATEGY_PALETTE[:len(exposure)] + [COLORS["border"]]),
+    ))
+    fig_pie.update_layout(**_dark_layout("Presupuesto en uso por cripto"), height=260, showlegend=True)
 
     return html.Div([
         dbc.Row([
@@ -376,9 +386,15 @@ def _render_overview():
 
 
 def _render_strategies():
-    strategies = db.get_active_strategies()
+    book, _ = _book_view()
+    # Strategies that traded (or hold a position) in the learning book
+    names = sorted({t["strategy_name"] for t in db.get_trades(limit=10**6, book=book)}
+                   | {p["strategy_name"] for p in db.get_open_positions(book=book)})
+    strategies = [{"name": n} for n in names]
     if not strategies:
-        return html.Div("No active strategies.", style={"color": COLORS["subtext"], "padding": "20px"})
+        return html.Div("La versión que aprende todavía no operó: aparecen aquí las estrategias con "
+                        "trades o posiciones (necesitan aprobación del evaluador y confirmaciones).",
+                        style={"color": COLORS["subtext"], "padding": "20px"})
 
     rows = []
     charts = []
@@ -392,16 +408,13 @@ def _render_strategies():
     for i, strat in enumerate(strategies):
         name  = strat["name"]
         current_price = prices.get(_symbol_of_name(name), 0.0)
-        stats = db.get_trade_stats(name, include_backtest=config.SHOW_BACKTEST_DATA)
-        db_capital = strat.get("capital", 0)  # Free capital from DB
+        stats = db.get_trade_stats(name, include_backtest=config.SHOW_BACKTEST_DATA, book=book)
         wr    = float(stats.get("win_rate") or 0)
         realized_pnl = float(stats.get("total_pnl") or 0)
         n     = int(stats.get("total_trades") or 0)
-        bt_cagr = float(strat.get("backtest_cagr") or 0)
-        bt_wr   = float(strat.get("backtest_win_rate") or 0)
 
         # Calculate committed notional and unrealized P&L for this strategy
-        open_pos = db.get_open_positions(name)
+        open_pos = db.get_open_positions(name, book=book)
         committed = 0.0
         unrealized_pnl = 0.0
         for pos in open_pos:
@@ -414,44 +427,34 @@ def _render_strategies():
                 else:
                     unrealized_pnl += (ep - current_price) * qty
 
-        # Total Capital = Initial Share + Realized P&L + Unrealized P&L
-        # Free Capital = Total Capital - Committed Notional (locked in open positions)
-        #
-        # db_capital = initial share allocated to strategy
-        initial_share = db_capital
-        true_total_cap = initial_share + realized_pnl + unrealized_pnl
-        free_cap = true_total_cap - committed  # After subtracting locked-in positions
+        # The learning book shares one budget: no per-strategy capital, only P&L
         total_pnl = realized_pnl + unrealized_pnl
 
         rows.append({
             "Strategy": name,
-            "Total Cap": f"${true_total_cap:,.2f}",
-            "Free Cap": f"${free_cap:,.2f}",
+            "Cripto": coin_of(_symbol_of_name(name)),
             "Committed": f"${committed:,.2f}" if committed > 0 else "—",
             "Realized P&L": f"${realized_pnl:+.2f}" if realized_pnl != 0 else "$0.00",
             "Unrealized P&L": f"${unrealized_pnl:+.2f}" if unrealized_pnl != 0 else "$0.00",
             "Total P&L": f"${total_pnl:+.2f}" if total_pnl != 0 else "$0.00",
             "Closed Trades": n,
             "Win Rate": f"{wr*100:.1f}%",
-            "BT CAGR": f"{bt_cagr*100:.1f}%",
         })
 
-        # Mini equity curve per strategy
+        # Mini equity curve per strategy (only where a history exists)
         perf = db.get_strategy_performance_history(name, days=60)
         color = STRATEGY_PALETTE[i % len(STRATEGY_PALETTE)]
-        if perf:
-            pdf = pd.DataFrame(perf)
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=pdf["date"], y=pdf["capital"],
-                name=name, line=dict(color=color, width=2), fill="tozeroy",
-                fillcolor=f"rgba{tuple(int(color.lstrip('#')[j:j+2], 16) for j in (0,2,4)) + (0.10,)}",
-            ))
-            fig.update_layout(**_dark_layout(name))
-            fig.update_layout(height=200, showlegend=False, margin=dict(l=30, r=10, t=30, b=30))
-        else:
-            fig = _empty_fig(f"{name}: no history")
-            fig.update_layout(height=200)
+        if not perf:
+            continue
+        pdf = pd.DataFrame(perf)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=pdf["date"], y=pdf["capital"],
+            name=name, line=dict(color=color, width=2), fill="tozeroy",
+            fillcolor=f"rgba{tuple(int(color.lstrip('#')[j:j+2], 16) for j in (0,2,4)) + (0.10,)}",
+        ))
+        fig.update_layout(**_dark_layout(name))
+        fig.update_layout(height=200, showlegend=False, margin=dict(l=30, r=10, t=30, b=30))
 
         charts.append(dbc.Col(dcc.Graph(figure=fig, config={"displayModeBar": False}), md=4))
 
@@ -486,7 +489,7 @@ def _render_strategies():
 
 
 def _render_positions():
-    positions = db.get_open_positions()
+    positions = db.get_open_positions(book=_learner_book())
     if not positions:
         return html.Div([
             html.P("No open positions.", style={"color": COLORS["subtext"], "padding": "20px"}),
@@ -565,7 +568,7 @@ def _render_positions():
 
 def _render_history():
     # Get trades - filter out backtest data based on config
-    trades = db.get_trades(limit=200, include_backtest=config.SHOW_BACKTEST_DATA)
+    trades = db.get_trades(limit=200, include_backtest=config.SHOW_BACKTEST_DATA, book=_learner_book())
     if not trades:
         return html.Div("No closed trades yet.", style={"color": COLORS["subtext"], "padding": "20px"})
 
@@ -575,6 +578,7 @@ def _render_history():
         pnl_pct = float(t["pnl_pct"]) * 100
         rows.append({
             "Date": t.get("exit_time", "")[:16],
+            "Cripto": coin_of(t.get("symbol") or config.SYMBOL),
             "Strategy": t["strategy_name"],
             "Side": t["side"],
             "Entry $": f"{float(t['entry_price']):,.2f}",
