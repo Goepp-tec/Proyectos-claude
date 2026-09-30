@@ -127,6 +127,11 @@ HL_MAX_TURNOVER            = _env_num("HL_MAX_TURNOVER", 300)    # month volume 
 HL_WALLET_REFRESH_HOURS    = _env_num("HL_WALLET_REFRESH_HOURS", 24)
 CFTC_URL                   = os.getenv("CFTC_URL", "https://publicreporting.cftc.gov/resource/gpe5-46if.json")
 
+# Confirmation engine (confirmations.py): technical, sentiment, news and Claude
+# checks the learning book needs on top of the evaluator (minimum from the
+# aggressiveness). Off = evaluator + risk engine only.
+CONFIRMATIONS_ENABLED      = os.getenv("CONFIRMATIONS_ENABLED", "true").lower() == "true"
+
 # ─── Strategy evaluator (strategy_evaluator.py): viability per strategy ──────
 EVAL_ENABLED            = os.getenv("EVAL_ENABLED", "true").lower() == "true"
 EVAL_INTERVAL_HOURS     = _env_num("EVAL_INTERVAL_HOURS", 24)

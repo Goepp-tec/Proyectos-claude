@@ -95,9 +95,10 @@ def fetch_data(replay_days: int, cache_dir: str, symbols=None) -> dict:
 def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
                learning: bool = True, progress=None, eval_interval_hours: float = None,
                funds: float = None, budget: float = None, aggressiveness: int = None,
-               collect_market: bool = True) -> dict:
+               collect_market: bool = True, confirmations: bool = True) -> dict:
     import main
     from adaptive_tuner import AdaptiveTuner
+    from confirmations import ConfirmationEngine
     from learning_engine import LearningEngine
     from market_data import MarketDataCollector, enrich
     from risk_engine import RiskEngine, RiskSettings
@@ -170,6 +171,11 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
     )
     bot.evaluator = StrategyEvaluator({s.name: s for s in learners}, history_fn=history,
                                       clock=lambda: clock["now"], live_book="lab")
+    # Confirmations on replay time: headlines, the macro calendar and Claude's
+    # view have no history, so only technical / sentiment / stablecoin checks vote.
+    bot.confirm = (ConfirmationEngine(dfs_fn=lambda sym, iv: bot._strat_dfs.get((sym, iv)),
+                                      symbols=symbols, clock=lambda: clock["now"])
+                   if confirmations else None)
 
     pairs = sorted({(symbol_of(s), s.candle_interval) for s in learners})
     close_times = {(sym, iv): data[sym][iv].index + DELTA[iv] for sym, iv in pairs}
@@ -256,6 +262,10 @@ def run_replay(data: dict, start: pd.Timestamp, end: pd.Timestamp, db_path: str,
         "blocked": {r["reason"].split("(")[0].strip(): r["n"] for r in db.get_conn().execute(
             "SELECT reason, COUNT(*) AS n FROM signal_log WHERE book=? AND reason LIKE 'riesgo:%' "
             "GROUP BY reason", (LEARN_BOOK,)).fetchall()},
+        "confirmations": confirmations,
+        "blocked_by_confirmations": db.get_conn().execute(
+            "SELECT COUNT(*) FROM signal_log WHERE book=? AND reason LIKE 'confirmaciones:%'",
+            (LEARN_BOOK,)).fetchone()[0],
     }
     return {
         "metrics": metrics, "equity": equity, "index": idx, "per_strategy": per_strategy,
@@ -379,6 +389,11 @@ def build_report(res: dict, data_source: str) -> str:
             w(f"{sym[:-4]:<10}{d['learn']:>12,.2f}{d['lab']:>12,.2f}{d['baseline']:>12,.2f}{d['n']:>16d}")
         w("")
     ev = res["risk_events"]
+    w(f"CONFIRMACIONES (libro que aprende): {'activas' if ev.get('confirmations', True) else 'DESACTIVADAS'}; "
+      f"senales bloqueadas por falta de confirmaciones: {ev.get('blocked_by_confirmations', 0)}")
+    w("  (en el replay solo votan tecnico, sentimiento y stablecoins: noticias, calendario y")
+    w("   Claude no tienen historia)")
+    w("")
     w("MOTOR DE RIESGO (libro que aprende)")
     kill = json.loads(ev["kill_switch"] or "null")
     w(f"  Freno de emergencia: {'ACTIVADO el ' + kill['at'][:10] + ' - ' + kill['reason'] if kill else 'no se activo'}")
@@ -452,6 +467,8 @@ def main_cli():
     ap.add_argument("--funds", type=float, default=None, help="paper funds (default INITIAL_CAPITAL)")
     ap.add_argument("--budget", type=float, default=None, help="risk budget (default 10%% of funds)")
     ap.add_argument("--aggressiveness", type=int, default=None, help="1..10 (default RISK_AGGRESSIVENESS)")
+    ap.add_argument("--no-confirmations", action="store_true",
+                    help="learning book without the confirmation engine (to compare)")
     ap.add_argument("--symbols", default=None,
                     help="comma separated, e.g. BTCUSDT,ETHUSDT (default SYMBOLS from .env)")
     ap.add_argument("--eval-interval-hours", type=float, default=168,
@@ -490,7 +507,8 @@ def main_cli():
     db_path = os.path.join(args.out, f"replay_{stamp}.db")
     res = run_replay(data, start, end, db_path, learning=not args.no_learning, progress=progress,
                      eval_interval_hours=args.eval_interval_hours, funds=args.funds,
-                     budget=args.budget, aggressiveness=args.aggressiveness)
+                     budget=args.budget, aggressiveness=args.aggressiveness,
+                     confirmations=not args.no_confirmations)
     from binance_client import BINANCE_PUBLIC_BASE
     report = build_report(res, BINANCE_PUBLIC_BASE)
     report_path = os.path.join(args.out, f"REPLAY_REPORT_{stamp}.txt")

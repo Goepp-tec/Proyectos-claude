@@ -44,6 +44,8 @@ from risk_engine import RiskEngine, RiskSettings, profile as risk_profile
 from market_data import MarketDataCollector, enrich as enrich_market_data
 from utils import price_of, symbol_of
 from daily_report import DailyReporter
+from confirmations import ConfirmationEngine
+from news_data import NewsCollector
 
 # ─── Logging setup ────────────────────────────────────────────────────────────
 # Console handler with colors (if available)
@@ -213,6 +215,10 @@ class TradingBot:
         self.reporter: DailyReporter = None   # daily report (reports/informe_diario_*.txt)
         # Free positioning / funding / Fear & Greed data, joined to every candle
         self.market = MarketDataCollector(self.symbols)
+        self.news = NewsCollector(self.symbols)       # headlines, macro calendar, stablecoins
+        # Extra confirmations for the learning book (technical, sentiment, news, Claude)
+        self.confirm = ConfirmationEngine(dfs_fn=lambda sym, iv: self._strat_dfs.get((sym, iv)),
+                                          symbols=self.symbols)
         self._strat_dfs: Dict[tuple, object] = {}     # (symbol, interval) -> candles
         self._logged_candle: Dict[str, str] = {}
         self._prices: Dict[str, float] = {}           # symbol -> latest price
@@ -421,12 +427,21 @@ class TradingBot:
             _shutdown.wait(timeout=config.STRATEGY_CHECK_INTERVAL_SEC)
 
     def _learner_gate(self, strat, signal, df):
-        """Blocked reason for the learning book, or None if the evaluator allows it."""
-        if not config.EVAL_ENABLED or self.evaluator is None:
-            return None
-        statuses = risk_profile(RiskSettings.load().aggressiveness)["statuses"]
-        ok, why = self.evaluator.can_trade(strat, signal.type, df, statuses)
-        return None if ok else why
+        """Blocked reason for the learning book, or None: first the evaluator (is
+        the strategy viable here?), then the confirmation engine (do independent
+        checks agree now?). The checklist is kept in the signal's metadata."""
+        prof = risk_profile(RiskSettings.load().aggressiveness)
+        if config.EVAL_ENABLED and getattr(self, "evaluator", None) is not None:
+            ok, why = self.evaluator.can_trade(strat, signal.type, df, prof["statuses"])
+            if not ok:
+                return why
+        confirm = getattr(self, "confirm", None)
+        if config.CONFIRMATIONS_ENABLED and confirm is not None:
+            ok, why, summary = confirm.decide(confirm.checks(strat, signal), prof["min_confirmations"])
+            signal.metadata = {**(signal.metadata or {}), "confirmaciones": summary}
+            if not ok:
+                return why
+        return None
 
     def _risk_housekeeping(self, price):
         """Apply dashboard risk changes and refresh the day / kill-switch state.
@@ -522,6 +537,7 @@ class TradingBot:
                 self.learning.update_performance_snapshots(strat_dict)
 
                 self.market.update()          # throttled to MARKET_DATA_INTERVAL_MIN
+                self.news.update()            # headlines hourly, calendar 6 h, stablecoins daily
                 if config.EVAL_ENABLED and self.evaluator:
                     self.evaluator.run_cycle_if_due()
                 if config.LEARNING_ENABLED and self.tuner:

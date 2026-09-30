@@ -8,8 +8,9 @@ Applies to the book the bot actually trades (the learning book):
                   and the sum of open positions never exceeds it
   • aggressiveness 1..10 (profile): risk per trade, max position size, max
     open positions, max exposure, daily loss limit, max drawdown before the
-    kill switch, minimum signal confidence and which evaluator ratings may
+    kill switch, minimum signal confidence, which evaluator ratings may
     trade (1-3 VIABLE; 4-7 + CONDICIONAL; 8-10 + EN_PRUEBA; never DESCARTADA)
+    and the net confirmations required (1-3: 2; 4-7: 1; 8-10: 0 — confirmations.py)
   • mode        : 'trade' or 'close_only' (no new entries, positions run to
                   their stop-loss / take-profit)
   • allow_short : paper shorts on/off (real spot trading cannot short)
@@ -47,11 +48,11 @@ def profile(level: int) -> dict:
     p = {k: _LOW[k] + t * (_HIGH[k] - _LOW[k]) for k in _LOW}
     p["max_open"] = int(round(p["max_open"]))
     if level <= 3:
-        p["statuses"] = ("VIABLE",)
+        p["statuses"], p["min_confirmations"] = ("VIABLE",), 2
     elif level <= 7:
-        p["statuses"] = ("VIABLE", "CONDICIONAL")
+        p["statuses"], p["min_confirmations"] = ("VIABLE", "CONDICIONAL"), 1
     else:
-        p["statuses"] = ("VIABLE", "CONDICIONAL", "EN_PRUEBA")
+        p["statuses"], p["min_confirmations"] = ("VIABLE", "CONDICIONAL", "EN_PRUEBA"), 0
     p["level"] = level
     return p
 

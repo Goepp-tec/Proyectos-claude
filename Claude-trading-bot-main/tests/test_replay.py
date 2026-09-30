@@ -75,9 +75,14 @@ def test_replay_runs_both_books_offline_and_keeps_baseline_frozen(tmp_path, monk
     blocked = [s for s in db.get_signals(book="observe", limit=10**6) if s["reason"].startswith("evaluator")]
     opened = [s for s in db.get_signals(book="observe", limit=10**6) if s["acted"]]
     assert blocked or not opened
+    # every learning-book trade carries the checklist of confirmations it passed
+    import json
+    learn_trades = db.get_trades(limit=10**6, book="observe")
+    assert all("confirmaciones" in (t["entry_features"] if isinstance(t["entry_features"], dict)
+                                     else json.loads(t["entry_features"] or "{}")) for t in learn_trades)
     from run_replay_test import build_report
     report = build_report(res, "sintetico")
-    assert "LAB" in report and "CALIFICACION FINAL" in report
+    assert "LAB" in report and "CALIFICACION FINAL" in report and "CONFIRMACIONES" in report
     # different capital bases (budget vs funds): the verdict compares returns, not dollars
     verdict = next(l for l in report.splitlines() if l.startswith("Aprende vs baseline"))
     assert "USD" not in verdict and "pts" in verdict
