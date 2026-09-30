@@ -150,6 +150,8 @@ COND_MIN_REGIME_PF      = _env_num("COND_MIN_REGIME_PF", 1.3)
 DISCARD_MIN_TRADES      = _env_num("DISCARD_MIN_TRADES", 40, int)
 DISCARD_MAX_PF          = _env_num("DISCARD_MAX_PF", 0.9)
 DISCARD_MAX_WINDOWS     = _env_num("DISCARD_MAX_WINDOWS", 1, int)   # profitable windows
+# 'Mixed' results with this many trades and PF < 1 (no regime where it works) = no edge
+EVAL_NO_EDGE_MIN_TRADES = _env_num("EVAL_NO_EDGE_MIN_TRADES", 60, int)
 DISCARD_LIVE_MIN_TRADES = _env_num("DISCARD_LIVE_MIN_TRADES", 20, int)
 DISCARD_LIVE_MAX_PF     = _env_num("DISCARD_LIVE_MAX_PF", 0.7)
 SIDE_BLOCK_MIN_TRADES   = 10     # a side (long/short) with >= N trades…

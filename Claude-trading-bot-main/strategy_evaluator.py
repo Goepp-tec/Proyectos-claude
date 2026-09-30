@@ -14,19 +14,31 @@ not been discarded:
 
 Rating (classify):
   VIABLE      enough trades, PF >= 1.2, profitable in >= 3 of 4 windows,
-              worst drawdown <= 15%                  → trades in any regime
+              worst drawdown <= 15%, and not losing in the MOST RECENT window
+                                                     → trades in any regime
   CONDICIONAL not viable overall, but PF >= 1.3 with >= 10 trades in some
-              regime                                 → trades only in those regimes
-  EN_PRUEBA   not enough / mixed evidence            → does not trade (lab only)
+              regime, and not losing in the most recent window
+                                                     → trades only in those regimes
+  EN_PRUEBA   not enough / mixed evidence, or it used to work but lost in the
+              last window                            → does not trade (lab only)
   DESCARTADA  >= 40 trades, PF < 0.9, profitable in <= 1 window and no regime
-              where it works (or clearly losing live) → value 0, never
-              re-evaluated nor traded again
+              where it works; or >= 60 trades and PF < 1 (no edge after fees)
+              and no regime where it works; or clearly losing live
+                                                     → value 0, never
+                                                       re-evaluated nor traded again
+Window counts are "of 4" and scale with EVAL_WINDOWS (3 of 4 = 6 of 8).
 A side (LONG/SHORT) with >= 10 trades and PF < 0.9 is blocked.
+
+Why the recent-window rule and the no-edge discard: in the 5-coin replays the
+best-looking combinations on past data did not carry forward (selection bias
+over 125 combinations); many 'mixed' strategies with dozens of trades and
+PF < 1 stayed EN_PRUEBA forever.
 
 Purely numerical: no LLM involved.
 """
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -99,6 +111,11 @@ def _not_viable_because(m: dict) -> str:
 def classify(m: dict) -> dict:
     """Pure rating from aggregated metrics (see module docstring)."""
     n, pf, pw, windows = m["trades"], m["profit_factor"], m["profitable_windows"], m["windows"]
+    # thresholds are "of 4 windows" and scale with the number of windows
+    need_windows = math.ceil(config.VIABLE_MIN_WINDOWS * max(windows, 1) / 4)
+    max_discard_windows = math.floor(config.DISCARD_MAX_WINDOWS * max(windows, 1) / 4)
+    recent = (m.get("window_pnl") or [None])[-1]
+    recent_loss = recent is not None and recent < 0
     good_regimes = [r for r, s in m["by_regime"].items()
                     if s["trades"] >= config.COND_MIN_REGIME_TRADES
                     and s["profit_factor"] >= config.COND_MIN_REGIME_PF]
@@ -112,7 +129,7 @@ def classify(m: dict) -> dict:
     out = dict(allowed_regimes=[], allowed_sides=sides, score=score)
 
     if (n >= config.DISCARD_MIN_TRADES and pf < config.DISCARD_MAX_PF
-            and pw <= config.DISCARD_MAX_WINDOWS and not good_regimes):
+            and pw <= max_discard_windows and not good_regimes):
         return {**out, "status": "DESCARTADA", "score": 0.0, "allowed_sides": [],
                 "reason": f"pierde de forma consistente: {n} trades, PF {pf:.2f}, rentable en "
                           f"{pw}/{windows} ventanas y en ningun tipo de mercado"}
@@ -121,10 +138,19 @@ def classify(m: dict) -> dict:
         return {**out, "status": "DESCARTADA", "score": 0.0, "allowed_sides": [],
                 "reason": f"pierde en vivo ({live['trades']} trades, PF {live['profit_factor']:.2f}) "
                           f"y en historico (PF {pf:.2f})"}
+    if n >= config.EVAL_NO_EDGE_MIN_TRADES and pf < 1.0 and not good_regimes:
+        return {**out, "status": "DESCARTADA", "score": 0.0, "allowed_sides": [],
+                "reason": f"sin ventaja tras {n} trades: PF {pf:.2f} < 1 despues de comisiones, "
+                          f"rentable en {pw}/{windows} ventanas y en ningun tipo de mercado"}
     if not sides:
         return {**out, "status": "EN_PRUEBA", "reason": "ambas direcciones pierden"}
-    if (n >= config.VIABLE_MIN_TRADES and pf >= config.VIABLE_MIN_PF
-            and pw >= config.VIABLE_MIN_WINDOWS and m["worst_drawdown"] <= config.VIABLE_MAX_DRAWDOWN):
+    viable = (n >= config.VIABLE_MIN_TRADES and pf >= config.VIABLE_MIN_PF
+              and pw >= need_windows and m["worst_drawdown"] <= config.VIABLE_MAX_DRAWDOWN)
+    if (viable or good_regimes) and recent_loss:
+        return {**out, "status": "EN_PRUEBA",
+                "reason": f"funcionaba antes (PF {pf:.2f}, rentable en {pw}/{windows} ventanas), pero "
+                          f"pierde en la ventana mas reciente ({recent:+.2f})"}
+    if viable:
         return {**out, "status": "VIABLE", "allowed_regimes": list(REGIMES),
                 "reason": f"{n} trades, PF {pf:.2f}, rentable en {pw}/{windows} ventanas, "
                           f"peor drawdown {m['worst_drawdown']:.1%}"}

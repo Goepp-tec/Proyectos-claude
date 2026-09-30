@@ -38,9 +38,9 @@ def _history(interval, days, end, symbol=None):
 
 
 def _metrics(n=40, pf=1.0, windows_profitable=2, worst_dd=0.05, regimes=None, sides=None,
-             live=None):
+             live=None, windows=4, window_pnl=None):
     return dict(trades=n, profit_factor=pf, profitable_windows=windows_profitable,
-                windows=4, worst_drawdown=worst_dd, expectancy=0.0,
+                windows=windows, window_pnl=window_pnl or [], worst_drawdown=worst_dd, expectancy=0.0,
                 by_regime=regimes or {}, by_side=sides or {}, live=live or {"trades": 0, "profit_factor": 0})
 
 
@@ -177,3 +177,36 @@ def test_windows_do_not_overlap_and_start_after_warmup(evaluator):
     for (s1, e1), (s2, _) in zip(seen, seen[1:]):
         assert e1 < s2
     assert seen[-1][1] < T0
+
+
+# ─── Stricter rules (after the 5-coin replays: past winners did not carry forward) ──
+
+def test_viable_or_conditional_need_a_profitable_recent_window():
+    from strategy_evaluator import classify
+    good = dict(n=45, pf=1.5, windows_profitable=3, worst_dd=0.06)
+    assert classify(_metrics(**good, window_pnl=[-2, 5, 3, 4]))["status"] == "VIABLE"
+    r = classify(_metrics(**good, window_pnl=[5, 3, 4, -2]))            # lost in the last 6 months
+    assert r["status"] == "EN_PRUEBA" and "reciente" in r["reason"]
+    regimes = {"TRENDING_UP": {"trades": 15, "profit_factor": 1.8}}
+    r = classify(_metrics(n=35, pf=0.95, windows_profitable=2, regimes=regimes, window_pnl=[3, 2, 1, -4]))
+    assert r["status"] == "EN_PRUEBA" and "reciente" in r["reason"]
+
+
+def test_many_trades_without_an_edge_are_discarded():
+    """'Mixed results' with plenty of trades and PF < 1 is no edge after fees: it
+    stayed EN_PRUEBA forever. With >= 60 trades it is discarded (value 0)."""
+    from strategy_evaluator import classify
+    r = classify(_metrics(n=80, pf=0.97, windows_profitable=2))
+    assert r["status"] == "DESCARTADA" and r["score"] == 0.0 and "sin ventaja" in r["reason"]
+    assert classify(_metrics(n=50, pf=0.97, windows_profitable=2))["status"] == "EN_PRUEBA"
+    regimes = {"RANGING": {"trades": 20, "profit_factor": 1.6}}        # works somewhere: keep it
+    assert classify(_metrics(n=80, pf=0.97, windows_profitable=2, regimes=regimes))["status"] == "CONDICIONAL"
+
+
+def test_window_thresholds_scale_with_the_number_of_windows():
+    from strategy_evaluator import classify
+    base = dict(n=90, pf=1.5, worst_dd=0.06, windows=8)
+    assert classify(_metrics(**base, windows_profitable=5))["status"] != "VIABLE"   # 5 of 8 < 3 of 4
+    assert classify(_metrics(**base, windows_profitable=6))["status"] == "VIABLE"
+    r = classify(_metrics(n=90, pf=0.8, windows_profitable=2, windows=8))          # 2 of 8 <= 1 of 4
+    assert r["status"] == "DESCARTADA"
