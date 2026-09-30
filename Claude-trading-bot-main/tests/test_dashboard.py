@@ -201,3 +201,19 @@ def test_a_refresh_racing_a_tab_click_still_draws_the_new_tab(temp_db):
         content, rendered = dash_app.render_tab_for(tab, "interval-refresh", rendered="tab-overview")
         assert content is not dash.no_update and rendered == tab
         assert dash_app.render_tab_for(tab, "interval-refresh", rendered=tab) is dash.no_update
+
+
+def test_learning_tab_shows_recent_decisions_and_claude_views(temp_db):
+    from datetime import datetime, timezone
+    from claude_view import set_view
+    from dashboard import app as dash_app
+    db.set_meta("trading_mode", "OBSERVE")
+    now = datetime.now(timezone.utc).isoformat()
+    db.record_signal(book="observe", strategy_name="Supertrend@SOL", candle_ts="c", signal_type="BUY",
+                     confidence=0.7, ml_confidence=0.6, price=150.0, acted=False,
+                     reason="confirmaciones: VETO - alertas de noticias: noticia grave: Solana DEX exploited",
+                     recorded_at=now)
+    set_view("SOL", long="bloquear", short="neutral", nota="exploit reciente", hours=6)
+    out = _dump(dash_app._render_learning())
+    assert "Decisiones recientes" in out and "Supertrend@SOL" in out and "Solana DEX exploited" in out
+    assert "Revisión de Claude" in out and "exploit reciente" in out and "bloquear" in out

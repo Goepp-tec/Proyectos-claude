@@ -155,3 +155,29 @@ def test_dashboard_shows_the_latest_daily_report(temp_db, tmp_path):
     assert "INFORME DOS" in out and "2026-10-01" in out          # latest shown, older selectable
     assert "INFORME UNO" in _dump(dash_app.show_daily_report(str(tmp_path / "informe_diario_2026-10-01.txt")))
     assert dash_app.render_tab_for("tab-report", "interval-refresh", rendered="tab-report") is dash.no_update
+
+
+def test_report_measures_what_the_confirmations_avoided(reporter):
+    """Signals blocked by confirmations vs what the lab (no filter) did with them."""
+    def blocked(name, h, reason="confirmaciones: faltan confirmaciones (1 a favor, 2 en contra)"):
+        db.record_signal(book="main", strategy_name=name, candle_ts=T(h), signal_type="BUY", confidence=0.7,
+                         ml_confidence=0.6, price=1.0, acted=False, reason=reason, recorded_at=T(h))
+
+    def lab_trade(name, h, pnl):
+        db.record_trade(strategy_name=name, symbol="BTCUSDT", side="LONG", entry_price=1.0, exit_price=1.0,
+                        quantity=1.0, pnl=pnl, pnl_pct=pnl / 100, fees_paid=0.0, entry_time=T(h, 1),
+                        exit_time=T(h + 3), duration_hours=3.0, exit_reason="STOP_LOSS",
+                        entry_features={}, book="lab", closed_at=T(h + 3))
+    blocked("A", 2); lab_trade("A", 2, -2.0)              # blocked a loser
+    blocked("B", 4); lab_trade("B", 4, -1.0)              # blocked a loser
+    blocked("C", 6); lab_trade("C", 6, 3.0)               # blocked a winner
+    blocked("D", 8, "confirmaciones: VETO - calendario macro: CPI")   # no lab twin: pending
+    db.record_trade(strategy_name="A", symbol="BTCUSDT", side="LONG", entry_price=1.0, exit_price=1.0,
+                    quantity=1.0, pnl=1.5, pnl_pct=0.015, fees_paid=0.0, entry_time=T(9), exit_time=T(11),
+                    duration_hours=2.0, exit_reason="TAKE_PROFIT", book="main", closed_at=T(11),
+                    entry_features={"confirmaciones": {"neto": 3}})
+    text = reporter.build(DAY)
+    section = text.split("CONFIRMACIONES")[1].split("APRENDIZAJE")[0]
+    assert "4 senales bloqueadas" in section and "1 por veto" in section
+    assert "2 habrian perdido" in section and "1 habria ganado" in section and "1 sin resultado" in section
+    assert "neto >= 3: 1 trades, 1 con ganancia" in section

@@ -29,7 +29,7 @@ import pandas as pd
 
 import config
 import database as db
-from utils import coin_of
+from utils import coin_of, utc_now
 
 # ─── App bootstrap ────────────────────────────────────────────────────────────
 
@@ -816,10 +816,36 @@ def _render_learning():
         {"if": {"filter_query": '{Decisión} = "rollback"'}, "color": COLORS["red"]},
         {"if": {"filter_query": '{Decisión} = "rejected"'}, "color": COLORS["subtext"]},
     ]
+    # What the learning book decided lately, and why (evaluator / confirmations / risk)
+    since = (utc_now() - pd.Timedelta(hours=24)).isoformat()
+    signal_rows = [{
+        "Hora (UTC)": r["recorded_at"][5:16].replace("T", " "),
+        "Estrategia": r["strategy_name"],
+        "Señal": r["signal_type"],
+        "Resultado": "ABIERTA" if r["acted"] else "bloqueada",
+        "Motivo": (r["reason"] or "")[:160],
+    } for r in db.get_conn().execute(
+        "SELECT * FROM signal_log WHERE book=? AND recorded_at >= ? ORDER BY recorded_at DESC LIMIT 200",
+        (learner_book, since)).fetchall()]
+    from claude_view import all_views
+    claude_rows = [{"Cripto": coin, "Largos": v["long"], "Cortos": v["short"],
+                    "Estado": "vigente" if v["vigente"] else "vencida",
+                    "Hasta (UTC)": v["expires_at"][5:16].replace("T", " "), "Nota": v.get("nota", "")}
+                   for coin, v in all_views().items()]
+    decision_style = [{"if": {"filter_query": '{Resultado} = "ABIERTA"'}, "color": COLORS["green"]}]
+
     return html.Div([
         notice,
         cards,
         dcc.Graph(figure=fig, config={"displayModeBar": False}),
+        html.H6(f"Decisiones recientes del libro que aprende (24 h, {len(signal_rows)} señales)",
+                style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
+        _table(signal_rows, page_size=10, conditional=decision_style) if signal_rows else html.Div(
+            "Sin señales en las últimas 24 h.", style={"color": COLORS["subtext"]}),
+        html.H6("Revisión de Claude (voto o veto por cripto; vence sola)",
+                style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
+        _table(claude_rows) if claude_rows else html.Div(
+            "Todavía no hay revisiones de Claude.", style={"color": COLORS["subtext"]}),
         html.H6("Parámetros ajustables: actual vs baseline",
                 style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
         _table(param_rows, page_size=12),

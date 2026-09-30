@@ -95,6 +95,7 @@ class DailyReporter:
         self._results(w, day, symbols, remember)
         self._per_coin(w, t0, t1, symbols)
         self._strategies(w, t0, t1, p["statuses"])
+        self._confirmations(w, t0, t1)
         self._learning(w, t0, t1)
         self._risk(w, t0, t1)
         self._market(w, symbols)
@@ -197,6 +198,47 @@ class DailyReporter:
                   for k in ("VIABLE", "CONDICIONAL", "EN_PRUEBA", "DESCARTADA")}
         w("Estado actual: " + ", ".join(f"{k} {v}" for k, v in counts.items())
           + f" | con esta agresividad operan: {', '.join(allowed_now)}")
+        w("")
+
+    def _confirmations(self, w, t0, t1):
+        """Blocked signals vs what the lab (no filter) did with the same signal."""
+        learn_book = self.books.get("aprende", ("main",))[0]
+        rows = db.get_conn().execute(
+            "SELECT strategy_name, reason, recorded_at FROM signal_log WHERE book=? AND acted=0 "
+            "AND reason LIKE 'confirmaciones:%' AND recorded_at >= ? AND recorded_at < ?",
+            (learn_book, t0, t1)).fetchall()
+        lab = db.get_trades(limit=10**7, book="lab")
+        lost = won = pending = 0
+        for r in rows:
+            lo = (datetime.fromisoformat(r["recorded_at"]) - timedelta(minutes=5)).isoformat()
+            hi = (datetime.fromisoformat(r["recorded_at"]) + timedelta(minutes=15)).isoformat()
+            twin = [t for t in lab if t["strategy_name"] == r["strategy_name"] and lo <= t["entry_time"] <= hi]
+            if twin:
+                won += float(twin[0]["pnl"]) > 0
+                lost += float(twin[0]["pnl"]) <= 0
+            else:
+                pending += 1      # still open in the lab, or the lab did not take it
+        vetoes = sum("VETO" in (r["reason"] or "") for r in rows)
+        w("CONFIRMACIONES (libro que aprende)")
+        w(f"  {len(rows)} senales bloqueadas por confirmaciones ({vetoes} por veto, "
+          f"{len(rows) - vetoes} por faltar confirmaciones)")
+        if rows:
+            plural = lambda n, one, many: f"{n} {one if n == 1 else many}"
+            w(f"  El lab (sin filtro) con esas mismas senales: {plural(lost, 'habria perdido', 'habrian perdido')}, "
+              f"{plural(won, 'habria ganado', 'habrian ganado')}, {pending} sin resultado todavia")
+        groups = {">= 3": [], "<= 2": []}
+        for t in self._trades(learn_book, t0, t1):
+            feats = t.get("entry_features") or {}
+            if isinstance(feats, str):
+                try:
+                    feats = json.loads(feats)
+                except ValueError:
+                    feats = {}
+            net = (feats.get("confirmaciones") or {}).get("neto")
+            if net is not None:
+                groups[">= 3" if net >= 3 else "<= 2"].append(float(t["pnl"]))
+        w("  Trades cerrados por confirmaciones: " + " | ".join(
+            f"neto {k}: {len(v)} trades, {sum(p > 0 for p in v)} con ganancia" for k, v in groups.items()))
         w("")
 
     def _learning(self, w, t0, t1):
