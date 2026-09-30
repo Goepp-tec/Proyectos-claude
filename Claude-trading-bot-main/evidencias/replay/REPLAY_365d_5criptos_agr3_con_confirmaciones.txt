@@ -1,0 +1,332 @@
+REPLAY HISTORICO ACELERADO — APRENDE vs BASELINE
+========================================================================
+Generado        : 2026-09-30 07:28 UTC
+Periodo         : 2025-09-30 03:00 -> 2026-09-30 03:00 UTC (365 dias)
+Datos           : https://api.binance.com (velas reales BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, XRPUSDT 1h/4h/1d)
+Fondos (paper)  : $1,000 x 5 criptos = $5,000  (capital de LAB y BASELINE)
+Presupuesto     : $100  (capital de APRENDE)  |  agresividad 3/10: riesgo/operacion 0.86%, max 3 posiciones, limite diario 2.6%, freno 11%, opera: VIABLE
+BTC buy & hold  : -27.15% en el mismo periodo (referencia)
+Canasta b&h     : -35.97% (mismo peso en cada cripto: BTC -27.1%, ETH -36.3%, SOL -43.1%, BNB -25.4%, XRP -47.9%)
+Evaluador       : cada 336 h de tiempo simulado (en vivo: cada 24 h); tuner cada 24 h
+Duracion calculo: 104.9 min
+
+APRENDE  = 25 estrategias x 5 cripto(s); solo opera lo que el evaluador
+           aprueba para esta agresividad; tamano y limites del motor de riesgo sobre
+           el PRESUPUESTO (uno solo para todas las criptos). Sus % son sobre el presupuesto.
+LAB      = las mismas sin filtro (menos las DESCARTADAS): la evidencia en vivo
+BASELINE = las 8 originales con parametros por defecto congelados, sin filtro
+
+Metrica                                   APRENDE            LAB       BASELINE
+-------------------------------------------------------------------------------
+Retorno total                              -9.35%         -1.85%         -1.41%
+CAGR                                       -9.35%         -1.85%         -1.41%
+Max drawdown                               12.08%          2.55%          4.62%
+Profit factor                                0.53           0.85           0.94
+Win rate                                    35.9%          36.5%          35.1%
+Numero de trades                               39           2307           1588
+Sharpe simple (diario, anualiz.)            -1.00          -1.03          -0.37
+Equity final                               $90.65      $4,907.46      $4,929.26
+Fees pagadas                                $1.48         $61.10        $108.13
+
+Aprende vs baseline: retorno -9.35% vs -1.41% (-7.94 pts), max drawdown 12.1% vs 4.6% -> NO supero.
+Aprende vs lab: retorno -9.35% vs -1.85% (-7.50 pts), max drawdown 12.1% vs 2.6% -> NO supero.
+  OJO: hizo 39 trades vs 1588 del baseline; buena parte de la
+  diferencia viene de operar menos (el filtro evita estrategias no viables).
+
+RESULTADO POR CRIPTO (P&L de trades cerrados, USD)
+Cripto         Aprende         Lab    Baseline  Trades aprende
+BTC              -0.82      -21.75       -9.21               6
+ETH              -0.33      -15.52      -28.68               1
+SOL              -2.97      -22.70      -27.04              21
+BNB              -4.52      -18.16      -10.84               7
+XRP              -0.58      -22.44       -1.57               4
+
+CONFIRMACIONES (libro que aprende): activas; senales bloqueadas por falta de confirmaciones: 194
+  (en el replay solo votan tecnico, sentimiento y stablecoins: noticias, calendario y
+   Claude no tienen historia)
+
+MOTOR DE RIESGO (libro que aprende)
+  Freno de emergencia: ACTIVADO el 2026-04-17 - caida de 10.60 USD desde el maximo (limite 10.56 USD = 11% del presupuesto)
+  Entradas bloqueadas por riesgo:
+       71 x riesgo: freno de emergencia activado
+        7 x riesgo: maximo de 3 posiciones abiertas
+        1 x riesgo: confianza 0.52 < 0.56
+        1 x riesgo: confianza 0.55 < 0.56
+
+EQUITY FINAL POR ESTRATEGIA (aprende / lab / baseline) Y CALIFICACION FINAL
+Estrategia                     Aprende       Lab  Baseline  Estado       Punt.  Motivo
+EMA5_Momentum                    -0.13     37.96    118.28  DESCARTADA    0.00  pierde en vivo (20 trades, PF 0.70) y en historico (PF 0.83)
+DualMA_Crossover                  0.80     42.03    130.35  EN_PRUEBA     0.05  pocos trades (2 < 30) para decidir
+Regime_RiskOnOff                  0.80     36.01    114.83  DESCARTADA    0.00  pierde de forma consistente: 106 trades, PF 0.87, rentable en 1/4 vent
+PriceMomentum_25                  0.80     41.93    132.83  EN_PRUEBA     0.39  pocos trades (18 < 30) para decidir
+Residual_MeanRev                  0.80     40.00    129.17  DESCARTADA    0.00  pierde de forma consistente: 171 trades, PF 0.77, rentable en 0/4 vent
+Donchian_Breakout                 0.80     39.08    124.89  CONDICIONAL   0.74  en conjunto no es viable (23 trades < 30), pero funciona en: lateral
+Blended_MomentumMR                0.80     37.80    117.19  DESCARTADA    0.00  pierde en vivo (26 trades, PF 0.68) y en historico (PF 0.99)
+BTC_MomentumBreakout              0.80     40.04    125.16  EN_PRUEBA     0.29  pocos trades (12 < 30) para decidir
+RSI_Bollinger                     0.80     37.13         -  DESCARTADA    0.00  pierde en vivo (33 trades, PF 0.59) y en historico (PF 0.98)
+MACD_Momentum                     0.80     37.05         -  DESCARTADA    0.00  pierde en vivo (80 trades, PF 0.58) y en historico (PF 0.93)
+EMA_Crossover                     0.80     40.00         -  DESCARTADA    0.00  pierde de forma consistente: 347 trades, PF 0.89, rentable en 0/4 vent
+Breakout                          0.80     40.00         -  DESCARTADA    0.00  pierde de forma consistente: 120 trades, PF 0.79, rentable en 0/4 vent
+Turtle_Breakout                   0.80     43.20         -  CONDICIONAL   0.64  en conjunto no es viable (28 trades < 30, rentable en 2/4 ventanas), p
+Connors_RSI2                      0.80     39.06         -  EN_PRUEBA     0.24  resultados mixtos: PF 0.99, rentable en 1/4 ventanas
+Bollinger_Squeeze                 0.80     38.49         -  DESCARTADA    0.00  pierde de forma consistente: 87 trades, PF 0.84, rentable en 1/4 venta
+Supertrend                        0.87     36.90         -  DESCARTADA    0.00  pierde en vivo (30 trades, PF 0.65) y en historico (PF 0.90)
+Golden_Cross_50_200               0.80     43.30         -  EN_PRUEBA     0.15  pocos trades (5 < 30) para decidir
+FearGreed_Contrarian              0.80     31.69         -  EN_PRUEBA     0.07  pocos trades (18 < 30) para decidir
+Funding_Contrarian                0.80     39.11         -  EN_PRUEBA     0.00  pocos trades (6 < 30) para decidir
+TopTraders_Follow                 0.80     40.73         -  EN_PRUEBA     0.17  pocos trades (8 < 30) para decidir
+Crowd_vs_TopTraders               0.80     39.88         -  EN_PRUEBA     0.00  pocos trades (8 < 30) para decidir
+Carver_EWMAC                      0.80     38.69         -  EN_PRUEBA     0.16  pocos trades (11 < 30) para decidir
+SmartMoney_Consensus              0.80     39.98         -  EN_PRUEBA     0.00  pocos trades (6 < 30) para decidir
+HL_TopWallets_Follow              0.80     40.00         -  EN_PRUEBA     0.00  pocos trades (0 < 30) para decidir
+COT_Institucional                 0.80     39.15         -  EN_PRUEBA     0.12  pocos trades (10 < 30) para decidir
+EMA5_Momentum@ETH                 0.80     41.54    111.91  DESCARTADA    0.00  pierde de forma consistente: 47 trades, PF 0.60, rentable en 1/4 venta
+DualMA_Crossover@ETH              0.80     39.24    122.90  EN_PRUEBA     0.10  pocos trades (4 < 30) para decidir
+Regime_RiskOnOff@ETH              0.47     42.54    134.91  VIABLE        1.00  75 trades, PF 1.87, rentable en 4/4 ventanas, peor drawdown 6.7%
+PriceMomentum_25@ETH              0.80     34.87    112.48  EN_PRUEBA     0.39  pocos trades (21 < 30) para decidir
+Residual_MeanRev@ETH              0.80     39.69    125.10  DESCARTADA    0.00  pierde de forma consistente: 163 trades, PF 0.82, rentable en 1/4 vent
+Donchian_Breakout@ETH             0.80     42.60    130.74  CONDICIONAL   0.51  en conjunto no es viable (19 trades < 30), pero funciona en: lateral
+Blended_MomentumMR@ETH            0.80     40.00    113.16  DESCARTADA    0.00  pierde de forma consistente: 90 trades, PF 0.71, rentable en 0/4 venta
+BTC_MomentumBreakout@ETH          0.80     39.35    122.97  EN_PRUEBA     0.26  pocos trades (9 < 30) para decidir
+RSI_Bollinger@ETH                 0.80     40.00         -  DESCARTADA    0.00  pierde de forma consistente: 87 trades, PF 0.44, rentable en 0/4 venta
+MACD_Momentum@ETH                 0.80     33.56         -  DESCARTADA    0.00  pierde en vivo (100 trades, PF 0.56) y en historico (PF 0.98)
+EMA_Crossover@ETH                 0.80     40.00         -  DESCARTADA    0.00  pierde de forma consistente: 353 trades, PF 0.82, rentable en 0/4 vent
+Breakout@ETH                      0.80     34.21         -  DESCARTADA    0.00  pierde en vivo (53 trades, PF 0.65) y en historico (PF 0.97)
+Turtle_Breakout@ETH               0.80     44.46         -  CONDICIONAL   0.76  en conjunto no es viable (26 trades < 30), pero funciona en: lateral
+Connors_RSI2@ETH                  0.80     35.02         -  DESCARTADA    0.00  pierde en vivo (25 trades, PF 0.63) y en historico (PF 0.77)
+Bollinger_Squeeze@ETH             0.80     39.75         -  DESCARTADA    0.00  pierde de forma consistente: 78 trades, PF 0.74, rentable en 0/4 venta
+Supertrend@ETH                    0.80     40.00         -  DESCARTADA    0.00  pierde de forma consistente: 59 trades, PF 0.66, rentable en 1/4 venta
+Golden_Cross_50_200@ETH           0.80     39.32         -  EN_PRUEBA     0.15  pocos trades (5 < 30) para decidir
+FearGreed_Contrarian@ETH          0.80     30.80         -  EN_PRUEBA     0.15  pocos trades (15 < 30) para decidir
+Funding_Contrarian@ETH            0.80     40.44         -  EN_PRUEBA     0.00  pocos trades (1 < 30) para decidir
+TopTraders_Follow@ETH             0.80     40.58         -  EN_PRUEBA     0.23  pocos trades (11 < 30) para decidir
+Crowd_vs_TopTraders@ETH           0.80     39.94         -  EN_PRUEBA     0.17  pocos trades (13 < 30) para decidir
+Carver_EWMAC@ETH                  0.80     47.31         -  EN_PRUEBA     0.26  pocos trades (9 < 30) para decidir
+SmartMoney_Consensus@ETH          0.80     40.27         -  EN_PRUEBA     0.15  pocos trades (9 < 30) para decidir
+HL_TopWallets_Follow@ETH          0.80     40.00         -  EN_PRUEBA     0.00  pocos trades (0 < 30) para decidir
+COT_Institucional@ETH             0.80     41.30         -  EN_PRUEBA     0.04  pocos trades (5 < 30) para decidir
+EMA5_Momentum@SOL                -0.62     39.75    115.96  CONDICIONAL   0.79  en conjunto no es viable (27 trades < 30), pero funciona en: lateral, 
+DualMA_Crossover@SOL              0.80     38.56    120.75  EN_PRUEBA     0.00  pocos trades (5 < 30) para decidir
+Regime_RiskOnOff@SOL              0.80     40.00    107.28  DESCARTADA    0.00  pierde de forma consistente: 111 trades, PF 0.81, rentable en 1/4 vent
+PriceMomentum_25@SOL              0.80     38.56    123.24  EN_PRUEBA     0.37  pocos trades (18 < 30) para decidir
+Residual_MeanRev@SOL              0.80     40.00    136.25  DESCARTADA    0.00  pierde de forma consistente: 167 trades, PF 0.81, rentable en 1/4 vent
+Donchian_Breakout@SOL             0.80     38.53    120.75  CONDICIONAL   0.51  en conjunto no es viable (19 trades < 30), pero funciona en: lateral
+Blended_MomentumMR@SOL            0.80     41.60    123.78  DESCARTADA    0.00  pierde de forma consistente: 135 trades, PF 0.85, rentable en 1/4 vent
+BTC_MomentumBreakout@SOL          0.80     40.68    127.11  EN_PRUEBA     0.05  pocos trades (11 < 30) para decidir
+RSI_Bollinger@SOL                 0.80     40.00         -  DESCARTADA    0.00  pierde de forma consistente: 103 trades, PF 0.55, rentable en 0/4 vent
+MACD_Momentum@SOL                 0.80     40.00         -  DESCARTADA    0.00  pierde de forma consistente: 352 trades, PF 0.83, rentable en 0/4 vent
+EMA_Crossover@SOL                 0.80     37.91         -  DESCARTADA    0.00  pierde en vivo (23 trades, PF 0.63) y en historico (PF 0.98)
+Breakout@SOL                     -0.29     34.53         -  VIABLE        0.68  105 trades, PF 1.29, rentable en 3/4 ventanas, peor drawdown 7.6%
+Turtle_Breakout@SOL               0.80     44.13         -  CONDICIONAL   0.88  en conjunto no es viable (28 trades < 30), pero funciona en: lateral
+Connors_RSI2@SOL                  0.80     45.19         -  EN_PRUEBA     0.42  resultados mixtos: PF 1.07, rentable en 2/4 ventanas
+Bollinger_Squeeze@SOL             0.80     34.43         -  DESCARTADA    0.00  pierde en vivo (27 trades, PF 0.37) y en historico (PF 0.95)
+Supertrend@SOL                    0.30     35.25         -  EN_PRUEBA     0.31  resultados mixtos: PF 1.10, rentable en 1/4 ventanas
+Golden_Cross_50_200@SOL           0.80     42.53         -  EN_PRUEBA     0.17  pocos trades (5 < 30) para decidir
+FearGreed_Contrarian@SOL          0.80     28.91         -  EN_PRUEBA     0.29  pocos trades (17 < 30) para decidir
+Funding_Contrarian@SOL            0.80     37.75         -  DESCARTADA    0.00  pierde en vivo (22 trades, PF 0.68) y en historico (PF 0.40)
+TopTraders_Follow@SOL             0.80     40.46         -  EN_PRUEBA     0.13  pocos trades (7 < 30) para decidir
+Crowd_vs_TopTraders@SOL           0.80     39.47         -  EN_PRUEBA     0.00  pocos trades (8 < 30) para decidir
+Carver_EWMAC@SOL                  0.80     45.38         -  EN_PRUEBA     0.16  pocos trades (11 < 30) para decidir
+SmartMoney_Consensus@SOL          0.80     39.95         -  EN_PRUEBA     0.01  pocos trades (6 < 30) para decidir
+HL_TopWallets_Follow@SOL          0.80     40.00         -  EN_PRUEBA     0.00  pocos trades (0 < 30) para decidir
+COT_Institucional@SOL             0.80     40.00         -  EN_PRUEBA     0.00  pocos trades (0 < 30) para decidir
+EMA5_Momentum@BNB                -2.85     35.64    117.03  DESCARTADA    0.00  pierde en vivo (21 trades, PF 0.53) y en historico (PF 0.97)
+DualMA_Crossover@BNB              0.80     38.57    121.04  EN_PRUEBA     0.12  pocos trades (5 < 30) para decidir
+Regime_RiskOnOff@BNB             -0.89     36.68    118.45  CONDICIONAL   0.58  en conjunto no es viable (PF 1.14 < 1.2), pero funciona en: tendencia 
+PriceMomentum_25@BNB              0.80     40.76    127.29  EN_PRUEBA     0.43  pocos trades (13 < 30) para decidir
+Residual_MeanRev@BNB              0.80     40.00    109.60  DESCARTADA    0.00  pierde de forma consistente: 162 trades, PF 0.81, rentable en 1/4 vent
+Donchian_Breakout@BNB             0.80     45.96    141.89  CONDICIONAL   0.53  en conjunto no es viable (16 trades < 30), pero funciona en: lateral
+Blended_MomentumMR@BNB            0.80     40.00    129.10  DESCARTADA    0.00  pierde de forma consistente: 77 trades, PF 0.72, rentable en 1/4 venta
+BTC_MomentumBreakout@BNB          0.80     39.86    124.56  EN_PRUEBA     0.08  pocos trades (20 < 30) para decidir
+RSI_Bollinger@BNB                 0.80     40.00         -  DESCARTADA    0.00  pierde de forma consistente: 94 trades, PF 0.60, rentable en 0/4 venta
+MACD_Momentum@BNB                 0.80     38.72         -  DESCARTADA    0.00  pierde en vivo (28 trades, PF 0.68) y en historico (PF 0.96)
+EMA_Crossover@BNB                 0.80     40.00         -  DESCARTADA    0.00  pierde de forma consistente: 331 trades, PF 0.81, rentable en 1/4 vent
+Breakout@BNB                      0.80     37.81         -  DESCARTADA    0.00  pierde en vivo (23 trades, PF 0.69) y en historico (PF 0.94)
+Turtle_Breakout@BNB               0.80     47.19         -  CONDICIONAL   0.80  en conjunto no es viable (24 trades < 30), pero funciona en: lateral
+Connors_RSI2@BNB                  0.80     38.48         -  VIABLE        0.89  31 trades, PF 1.43, rentable en 4/4 ventanas, peor drawdown 2.9%
+Bollinger_Squeeze@BNB             0.80     38.77         -  DESCARTADA    0.00  pierde de forma consistente: 67 trades, PF 0.86, rentable en 1/4 venta
+Supertrend@BNB                    1.59     33.34         -  DESCARTADA    0.00  pierde en vivo (44 trades, PF 0.53) y en historico (PF 0.98)
+Golden_Cross_50_200@BNB           0.80     39.62         -  EN_PRUEBA     0.12  pocos trades (5 < 30) para decidir
+FearGreed_Contrarian@BNB          0.80     35.85         -  EN_PRUEBA     0.06  pocos trades (14 < 30) para decidir
+Funding_Contrarian@BNB            0.80     40.00         -  DESCARTADA    0.00  pierde de forma consistente: 68 trades, PF 0.62, rentable en 1/4 venta
+TopTraders_Follow@BNB             0.80     38.39         -  EN_PRUEBA     0.00  pocos trades (10 < 30) para decidir
+Crowd_vs_TopTraders@BNB           0.80     37.91         -  DESCARTADA    0.00  pierde en vivo (25 trades, PF 0.20) y en historico (PF 0.11)
+Carver_EWMAC@BNB                  0.80     38.72         -  EN_PRUEBA     0.12  pocos trades (4 < 30) para decidir
+SmartMoney_Consensus@BNB          0.80     39.48         -  EN_PRUEBA     0.00  pocos trades (2 < 30) para decidir
+HL_TopWallets_Follow@BNB          0.80     40.00         -  EN_PRUEBA     0.00  pocos trades (0 < 30) para decidir
+COT_Institucional@BNB             0.80     40.00         -  EN_PRUEBA     0.00  pocos trades (0 < 30) para decidir
+EMA5_Momentum@XRP                 0.80     36.37    113.00  EN_PRUEBA     0.25  ambas direcciones pierden
+DualMA_Crossover@XRP              0.80     38.79    121.60  EN_PRUEBA     0.00  pocos trades (3 < 30) para decidir
+Regime_RiskOnOff@XRP              0.80     47.08    143.46  EN_PRUEBA     0.42  resultados mixtos: PF 1.07, rentable en 2/4 ventanas
+PriceMomentum_25@XRP              0.80     39.17    119.54  CONDICIONAL   0.18  en conjunto no es viable (22 trades < 30, PF 0.76 < 1.2, rentable en 2
+Residual_MeanRev@XRP              0.80     40.00    136.36  DESCARTADA    0.00  pierde de forma consistente: 162 trades, PF 0.74, rentable en 0/4 vent
+Donchian_Breakout@XRP             0.80     43.17    132.28  EN_PRUEBA     0.27  pocos trades (20 < 30) para decidir
+Blended_MomentumMR@XRP            0.80     36.36    108.91  DESCARTADA    0.00  pierde de forma consistente: 104 trades, PF 0.88, rentable en 1/4 vent
+BTC_MomentumBreakout@XRP          0.80     39.41    123.15  EN_PRUEBA     0.14  pocos trades (11 < 30) para decidir
+RSI_Bollinger@XRP                 0.80     39.88         -  VIABLE        0.73  91 trades, PF 1.36, rentable en 3/4 ventanas, peor drawdown 3.4%
+MACD_Momentum@XRP                 0.80     36.13         -  EN_PRUEBA     0.50  resultados mixtos: PF 1.00, rentable en 3/4 ventanas
+EMA_Crossover@XRP                 0.80     39.85         -  DESCARTADA    0.00  pierde de forma consistente: 323 trades, PF 0.90, rentable en 1/4 vent
+Breakout@XRP                      0.80     35.48         -  CONDICIONAL   0.34  en conjunto no es viable (PF 1.15 < 1.2, rentable en 1/4 ventanas), pe
+Turtle_Breakout@XRP               0.80     37.39         -  CONDICIONAL   0.57  en conjunto no es viable (25 trades < 30, rentable en 2/4 ventanas), p
+Connors_RSI2@XRP                  0.80     43.88         -  EN_PRUEBA     0.35  resultados mixtos: PF 0.95, rentable en 2/4 ventanas
+Bollinger_Squeeze@XRP             0.20     41.77         -  VIABLE        0.68  63 trades, PF 1.29, rentable en 3/4 ventanas, peor drawdown 5.2%
+Supertrend@XRP                    0.80     35.69         -  EN_PRUEBA     0.53  resultados mixtos: PF 1.05, rentable en 3/4 ventanas
+Golden_Cross_50_200@XRP           0.80     44.05         -  EN_PRUEBA     0.07  pocos trades (4 < 30) para decidir
+FearGreed_Contrarian@XRP          0.80     28.99         -  EN_PRUEBA     0.00  pocos trades (18 < 30) para decidir
+Funding_Contrarian@XRP            0.80     35.17         -  EN_PRUEBA     0.09  pocos trades (22 < 30) para decidir
+TopTraders_Follow@XRP             0.80     40.77         -  EN_PRUEBA     0.12  pocos trades (6 < 30) para decidir
+Crowd_vs_TopTraders@XRP           0.80     40.18         -  EN_PRUEBA     0.20  pocos trades (13 < 30) para decidir
+Carver_EWMAC@XRP                  0.80     36.33         -  EN_PRUEBA     0.23  pocos trades (8 < 30) para decidir
+SmartMoney_Consensus@XRP          0.80     40.26         -  EN_PRUEBA     0.04  pocos trades (2 < 30) para decidir
+HL_TopWallets_Follow@XRP          0.80     40.00         -  EN_PRUEBA     0.00  pocos trades (0 < 30) para decidir
+COT_Institucional@XRP             0.80     40.00         -  EN_PRUEBA     0.00  pocos trades (0 < 30) para decidir
+Evaluaciones realizadas: 2561
+  descartada el 2025-09-30: Residual_MeanRev
+  descartada el 2025-09-30: EMA_Crossover
+  descartada el 2025-09-30: Breakout
+  descartada el 2025-09-30: Blended_MomentumMR@ETH
+  descartada el 2025-09-30: RSI_Bollinger@ETH
+  descartada el 2025-09-30: EMA_Crossover@ETH
+  descartada el 2025-09-30: Supertrend@ETH
+  descartada el 2025-09-30: Regime_RiskOnOff@SOL
+  descartada el 2025-09-30: Residual_MeanRev@SOL
+  descartada el 2025-09-30: RSI_Bollinger@SOL
+  descartada el 2025-09-30: MACD_Momentum@SOL
+  descartada el 2025-09-30: Residual_MeanRev@BNB
+  descartada el 2025-09-30: Blended_MomentumMR@BNB
+  descartada el 2025-09-30: RSI_Bollinger@BNB
+  descartada el 2025-09-30: EMA_Crossover@BNB
+  descartada el 2025-09-30: Funding_Contrarian@BNB
+  descartada el 2025-09-30: Residual_MeanRev@XRP
+  descartada el 2025-10-14: EMA5_Momentum@ETH
+  descartada el 2025-10-14: Residual_MeanRev@ETH
+  descartada el 2025-10-14: Bollinger_Squeeze@ETH
+  descartada el 2025-10-28: EMA_Crossover@SOL
+  descartada el 2025-10-28: EMA_Crossover@XRP
+  descartada el 2025-11-11: Blended_MomentumMR@SOL
+  descartada el 2025-11-25: MACD_Momentum@BNB
+  descartada el 2025-12-23: Bollinger_Squeeze@BNB
+  descartada el 2026-01-06: Bollinger_Squeeze
+  descartada el 2026-01-20: MACD_Momentum
+  descartada el 2026-01-20: Breakout@BNB
+  descartada el 2026-01-20: Blended_MomentumMR@XRP
+  descartada el 2026-02-03: RSI_Bollinger
+  descartada el 2026-03-03: MACD_Momentum@ETH
+  descartada el 2026-03-17: Bollinger_Squeeze@SOL
+  descartada el 2026-03-17: Funding_Contrarian@SOL
+  descartada el 2026-04-28: Supertrend
+  descartada el 2026-05-12: EMA5_Momentum
+  descartada el 2026-05-12: Breakout@ETH
+  descartada el 2026-06-23: Blended_MomentumMR
+  descartada el 2026-07-07: EMA5_Momentum@BNB
+  descartada el 2026-08-04: Supertrend@BNB
+  descartada el 2026-09-01: Connors_RSI2@ETH
+  descartada el 2026-09-15: Regime_RiskOnOff
+  descartada el 2026-09-29: Crowd_vs_TopTraders@BNB
+
+APRENDIZAJE: 10321 propuestas -> 53 aplicadas, 10250 rechazadas, 18 revertidas (rollback)
+Motivos de rechazo mas frecuentes:
+   5145 x ningun vecino mejora la ventana de propuesta
+   4313 x validacion: pocos trades
+    792 x validacion: profit factor no mejora lo suficiente
+Cambios aplicados / revertidos (orden cronologico):
+  2025-09-30  applied  EMA5_Momentum@SOL      ema_period        5 -> 6   validation PF 1.59->1.71, maxDD 9.6%->8.6%, 11 trades
+  2025-09-30  applied  Blended_MomentumMR@SOL rsi_oversold      38 -> 37   validation PF 0.94->1.03, maxDD 9.6%->7.2%, 39 trades
+  2025-09-30  applied  Blended_MomentumMR@XRP rsi_oversold      38 -> 39   validation PF 1.27->1.34, maxDD 3.9%->3.9%, 26 trades
+  2025-10-01  applied  EMA5_Momentum@BNB      atr_sl_mult       1.5 -> 1.25   validation PF 1.12->1.22, maxDD 5.2%->4.9%, 10 trades
+  2025-10-03  rollback Blended_MomentumMR@SOL rsi_oversold      37 -> 38   after 72h learner +0.00 vs baseline +3.73 (tolerance 0.02)
+  2025-10-04  applied  EMA5_Momentum@ETH      atr_sl_mult       1.5 -> 1.25   validation PF 1.35->1.52, maxDD 5.2%->5.7%, 13 trades
+  2025-10-04  applied  EMA5_Momentum@SOL      atr_tp_mult       3.5 -> 4   validation PF 2.20->2.46, maxDD 8.6%->8.6%, 10 trades
+  2025-10-06  applied  Donchian_Breakout      atr_sl_mult       1.5 -> 1.25   validation PF 0.97->1.15, maxDD 4.8%->4.1%, 10 trades
+  2025-10-06  applied  Blended_MomentumMR@SOL atr_tp_mult       3.8 -> 4.3   validation PF 0.89->1.11, maxDD 9.6%->6.7%, 40 trades
+  2025-10-07  rollback EMA5_Momentum@SOL      atr_tp_mult       4 -> 3.5   after 72h learner +0.00 vs baseline +0.58 (tolerance 0.02)
+  2025-10-07  applied  Regime_RiskOnOff@ETH   atr_tp_mult       4.5 -> 5   validation PF 1.75->1.94, maxDD 3.9%->3.9%, 23 trades
+  2025-10-08  applied  EMA5_Momentum@ETH      ema_period        5 -> 6   validation PF 1.86->2.03, maxDD 5.7%->5.1%, 11 trades
+  2025-10-09  applied  EMA5_Momentum@SOL      atr_sl_mult       1.5 -> 1.25   validation PF 1.15->1.39, maxDD 8.6%->7.2%, 10 trades
+  2025-10-09  applied  Blended_MomentumMR@SOL rsi_oversold      38 -> 37   validation PF 1.12->1.23, maxDD 6.7%->6.0%, 37 trades
+  2025-10-11  rollback EMA5_Momentum@ETH      ema_period        6 -> 5   after 72h learner +0.00 vs baseline +2.86 (tolerance 0.02)
+  2025-10-12  rollback EMA5_Momentum@SOL      atr_sl_mult       1.25 -> 1.5   after 72h learner +0.00 vs baseline +2.55 (tolerance 0.02)
+  2025-10-12  rollback Blended_MomentumMR@SOL rsi_oversold      37 -> 38   after 72h learner +0.00 vs baseline +2.25 (tolerance 0.02)
+  2025-10-12  applied  Blended_MomentumMR@XRP atr_sl_mult       1.8 -> 1.55   validation PF 1.47->1.71, maxDD 2.8%->2.3%, 25 trades
+  2025-10-13  applied  EMA5_Momentum@SOL      atr_tp_mult       3.5 -> 4   validation PF 0.90->1.02, maxDD 8.6%->8.6%, 10 trades
+  2025-10-13  applied  Blended_MomentumMR@SOL rsi_overbought    62 -> 63   validation PF 1.12->1.21, maxDD 6.7%->6.7%, 39 trades
+  2025-10-15  rollback Blended_MomentumMR@XRP atr_sl_mult       1.55 -> 1.8   after 72h learner +0.00 vs baseline +0.49 (tolerance 0.02)
+  2025-10-18  applied  EMA5_Momentum@SOL      atr_tp_mult       4 -> 4.5   validation PF 0.85->1.05, maxDD 9.5%->8.6%, 10 trades
+  2025-10-18  applied  Blended_MomentumMR@SOL rsi_oversold      38 -> 37   validation PF 1.14->1.25, maxDD 7.4%->6.8%, 41 trades
+  2025-11-01  applied  Regime_RiskOnOff@BNB   rsi_bull_min      50 -> 49   validation PF 1.92->2.25, maxDD 5.7%->4.6%, 24 trades
+  2025-11-04  rollback Regime_RiskOnOff@BNB   rsi_bull_min      49 -> 50   after 72h learner +0.00 vs baseline +2.12 (tolerance 0.02)
+  2025-11-11  applied  Blended_MomentumMR@XRP rsi_overbought    62 -> 61   validation PF 1.50->1.99, maxDD 2.3%->2.3%, 26 trades
+  2025-11-14  rollback Blended_MomentumMR@XRP rsi_overbought    61 -> 62   after 72h learner +0.00 vs baseline +0.37 (tolerance 0.02)
+  2025-11-16  applied  Regime_RiskOnOff@BNB   rsi_bull_min      50 -> 49   validation PF 2.13->2.50, maxDD 5.7%->4.6%, 24 trades
+  2025-11-18  applied  Regime_RiskOnOff@ETH   atr_tp_mult       5 -> 5.5   validation PF 1.72->2.01, maxDD 3.9%->3.9%, 28 trades
+  2025-11-18  applied  Blended_MomentumMR@XRP rsi_overbought    62 -> 61   validation PF 1.35->1.74, maxDD 4.2%->4.2%, 29 trades
+  2025-11-19  rollback Regime_RiskOnOff@BNB   rsi_bull_min      49 -> 50   after 72h learner +0.00 vs baseline +0.62 (tolerance 0.02)
+  2025-11-21  rollback Blended_MomentumMR@XRP rsi_overbought    61 -> 62   after 72h learner +0.00 vs baseline +5.86 (tolerance 0.02)
+  2025-11-23  applied  Regime_RiskOnOff@BNB   rsi_bull_min      50 -> 49   validation PF 2.37->2.80, maxDD 5.7%->4.6%, 23 trades
+  2025-11-25  applied  Blended_MomentumMR@XRP rsi_overbought    62 -> 61   validation PF 1.38->1.74, maxDD 4.2%->4.2%, 30 trades
+  2025-11-27  applied  EMA5_Momentum          atr_sl_mult       1.5 -> 1.25   validation PF 1.80->2.15, maxDD 2.4%->2.0%, 10 trades
+  2025-11-28  rollback Blended_MomentumMR@XRP rsi_overbought    61 -> 62   after 72h learner +0.00 vs baseline +0.11 (tolerance 0.02)
+  2025-11-29  applied  Regime_RiskOnOff@BNB   rsi_bull_min      49 -> 48   validation PF 2.63->2.83, maxDD 4.6%->4.6%, 22 trades
+  2025-11-29  applied  Blended_MomentumMR@XRP atr_sl_mult       1.8 -> 1.55   validation PF 1.39->1.61, maxDD 4.2%->3.6%, 31 trades
+  2025-12-02  rollback Regime_RiskOnOff@BNB   rsi_bull_min      48 -> 49   after 72h learner +0.00 vs baseline +3.55 (tolerance 0.02)
+  2025-12-06  applied  Regime_RiskOnOff@BNB   rsi_bull_min      49 -> 48   validation PF 2.44->2.62, maxDD 4.6%->4.6%, 22 trades
+  2025-12-15  applied  Regime_RiskOnOff@XRP   rsi_bull_min      50 -> 51   validation PF 1.14->1.20, maxDD 9.5%->8.2%, 27 trades
+  2025-12-18  rollback Regime_RiskOnOff@XRP   rsi_bull_min      51 -> 50   after 72h learner +0.00 vs baseline +2.53 (tolerance 0.02)
+  2025-12-19  applied  Regime_RiskOnOff@ETH   rsi_bull_min      50 -> 51   validation PF 2.14->2.28, maxDD 3.9%->3.9%, 24 trades
+  2025-12-23  applied  Regime_RiskOnOff@ETH   atr_sl_mult       2 -> 2.25   validation PF 1.73->1.89, maxDD 3.9%->5.4%, 21 trades
+  2025-12-26  rollback Regime_RiskOnOff@ETH   atr_sl_mult       2.25 -> 2   after 72h learner +0.00 vs baseline +0.23 (tolerance 0.02)
+  2026-01-09  applied  Blended_MomentumMR@XRP rsi_overbought    62 -> 61   validation PF 1.17->1.54, maxDD 4.5%->4.5%, 25 trades
+  2026-01-14  applied  EMA5_Momentum          atr_tp_mult       3.5 -> 4   validation PF 1.09->1.20, maxDD 2.7%->2.7%, 10 trades
+  2026-01-15  applied  Blended_MomentumMR@XRP rsi_overbought    61 -> 60   validation PF 1.25->1.39, maxDD 5.2%->5.2%, 24 trades
+  2026-01-18  rollback Blended_MomentumMR@XRP rsi_overbought    60 -> 61   after 72h learner +0.00 vs baseline +0.33 (tolerance 0.02)
+  2026-02-01  applied  Regime_RiskOnOff       rsi_bull_min      50 -> 51   validation PF 2.60->2.77, maxDD 1.7%->1.7%, 27 trades
+  2026-02-09  applied  Regime_RiskOnOff@BNB   atr_tp_mult       4.5 -> 5   validation PF 1.91->2.36, maxDD 4.6%->4.6%, 22 trades
+  2026-02-15  applied  EMA5_Momentum          atr_tp_mult       4 -> 4.5   validation PF 1.04->1.15, maxDD 2.8%->2.8%, 10 trades
+  2026-03-08  applied  Blended_MomentumMR     atr_tp_mult       3.8 -> 4.3   validation PF 1.53->1.72, maxDD 2.0%->1.9%, 15 trades
+  2026-04-11  applied  Blended_MomentumMR     atr_tp_mult       4.3 -> 4.8   validation PF 1.31->1.45, maxDD 2.5%->2.5%, 17 trades
+  2026-04-14  applied  Blended_MomentumMR     rsi_oversold      38 -> 39   validation PF 1.19->1.29, maxDD 2.5%->2.7%, 16 trades
+  2026-04-21  applied  Blended_MomentumMR     rsi_overbought    62 -> 63   validation PF 1.39->1.48, maxDD 2.7%->2.6%, 14 trades
+  2026-05-12  applied  Regime_RiskOnOff@ETH   atr_tp_mult       5.5 -> 6   validation PF 1.58->1.98, maxDD 5.2%->5.2%, 18 trades
+  2026-05-17  applied  Regime_RiskOnOff@ETH   atr_sl_mult       2 -> 2.25   validation PF 1.11->1.25, maxDD 6.3%->5.1%, 18 trades
+  2026-05-20  rollback Regime_RiskOnOff@ETH   atr_sl_mult       2.25 -> 2   after 72h learner +0.00 vs baseline +1.22 (tolerance 0.02)
+  2026-05-22  applied  Regime_RiskOnOff@ETH   rsi_bull_min      51 -> 52   validation PF 1.49->1.59, maxDD 5.2%->5.2%, 18 trades
+  2026-05-26  applied  Regime_RiskOnOff@ETH   atr_sl_mult       2 -> 2.25   validation PF 1.70->1.80, maxDD 5.2%->4.1%, 17 trades
+  2026-05-29  rollback Regime_RiskOnOff@ETH   atr_sl_mult       2.25 -> 2   after 72h learner +0.00 vs baseline +1.93 (tolerance 0.02)
+  2026-06-02  applied  Regime_RiskOnOff@ETH   atr_sl_mult       2 -> 2.25   validation PF 1.93->2.09, maxDD 5.2%->4.1%, 17 trades
+  2026-06-05  rollback Regime_RiskOnOff@ETH   atr_sl_mult       2.25 -> 2   after 72h learner +0.00 vs baseline +2.42 (tolerance 0.02)
+  2026-06-09  applied  Regime_RiskOnOff@ETH   atr_sl_mult       2 -> 2.25   validation PF 2.66->3.00, maxDD 5.2%->4.1%, 15 trades
+  2026-07-28  applied  Regime_RiskOnOff       atr_tp_mult       4.5 -> 5   validation PF 0.96->1.07, maxDD 4.5%->3.8%, 27 trades
+  2026-08-01  applied  Regime_RiskOnOff@BNB   atr_sl_mult       2 -> 2.25   validation PF 1.19->1.28, maxDD 4.6%->5.1%, 24 trades
+  2026-08-02  applied  Regime_RiskOnOff       atr_sl_mult       2 -> 1.75   validation PF 0.89->1.16, maxDD 4.7%->4.5%, 29 trades
+  2026-08-21  applied  Regime_RiskOnOff       atr_tp_mult       5 -> 5.5   validation PF 0.96->1.02, maxDD 5.2%->5.2%, 28 trades
+  2026-08-27  applied  Regime_RiskOnOff       atr_tp_mult       5.5 -> 6   validation PF 0.97->1.05, maxDD 5.2%->5.2%, 26 trades
+  2026-09-04  applied  Regime_RiskOnOff@XRP   rsi_bull_min      50 -> 49   validation PF 1.15->1.41, maxDD 2.5%->2.5%, 25 trades
+Parametros finales (aprende) distintos del baseline:
+  EMA5_Momentum: {'atr_sl_mult': 1.25, 'atr_tp_mult': 4.5}
+  Regime_RiskOnOff: {'rsi_bull_min': 51, 'atr_sl_mult': 1.75, 'atr_tp_mult': 6.0}
+  Donchian_Breakout: {'atr_sl_mult': 1.25}
+  Blended_MomentumMR: {'rsi_oversold': 39, 'rsi_overbought': 63, 'atr_tp_mult': 4.8}
+  EMA5_Momentum@ETH: {'atr_sl_mult': 1.25}
+  Regime_RiskOnOff@ETH: {'rsi_bull_min': 52, 'atr_sl_mult': 2.25, 'atr_tp_mult': 6.0}
+  EMA5_Momentum@SOL: {'ema_period': 6, 'atr_tp_mult': 4.5}
+  Blended_MomentumMR@SOL: {'rsi_oversold': 37, 'rsi_overbought': 63, 'atr_tp_mult': 4.3}
+  EMA5_Momentum@BNB: {'atr_sl_mult': 1.25}
+  Regime_RiskOnOff@BNB: {'rsi_bull_min': 48, 'atr_sl_mult': 2.25, 'atr_tp_mult': 5.0}
+  Regime_RiskOnOff@XRP: {'rsi_bull_min': 49}
+  Blended_MomentumMR@XRP: {'rsi_oversold': 39, 'rsi_overbought': 61, 'atr_sl_mult': 1.55}
+
+ADVERTENCIAS (leer)
+- Es un REPLAY/BACKTEST sobre datos pasados, no evidencia en vivo.
+- Riesgo de sobreajuste: los parametros y umbrales se eligieron mirando datos
+  historicos; un buen resultado aqui no garantiza nada hacia adelante.
+- SL/TP se simulan con un recorrido intra-hora (apertura->min/max->cierre);
+  el orden real dentro de la hora puede diferir. Fills simulados con
+  slippage 0.03% y fee 0.1%; sin spread real ni latencia.
+- El evaluador califica con backtests de los ~2 anos ANTERIORES a cada fecha
+  simulada (nunca con datos futuros), pero los umbrales del evaluador y el
+  catalogo se eligieron hoy: sigue habiendo riesgo de sesgo de seleccion.
+- Aprende y lab reparten el capital entre todas las estrategias y el baseline
+  entre las 8 originales: compare el equity TOTAL (en %), no por estrategia.
+- Profit factor y win rate con pocos trades no son estadisticamente fiables.
+- Indicadores calculados una vez sobre toda la historia (en vivo: sobre la
+  ventana de 600 velas); diferencias minimas en EMAs largas.
