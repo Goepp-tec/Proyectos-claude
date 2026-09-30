@@ -62,7 +62,7 @@ def test_an_uptrend_on_every_timeframe_confirms_a_long_not_a_short(temp_db):
     assert ok, reason
     assert "tendencia diaria" in summary["a_favor"] and "tendencia 4h" in summary["a_favor"]
     ok, reason, _ = eng.decide(eng.checks(_strat(), SELL), min_net=2)
-    assert not ok and reason.startswith("confirmaciones:") and "tendencia diaria" in reason
+    assert not ok and reason.startswith("confirmaciones:") and "amplitud" in reason
 
 
 def test_a_severe_headline_vetoes_new_longs_on_that_coin(temp_db):
@@ -145,3 +145,13 @@ def test_learning_gate_applies_confirmations_after_the_evaluator(temp_db, monkey
     assert sig.metadata["confirmaciones"]["neto"] >= 2                        # kept with the trade
     bot.evaluator.can_trade.return_value = (False, "evaluator: EN_PRUEBA")   # evaluator first
     assert bot._learner_gate(_strat(), sig, _frame("1h")) == "evaluator: EN_PRUEBA"
+
+
+def test_going_against_the_whole_market_is_vetoed(temp_db):
+    """A long while most coins are below their daily EMA-50 (or a short while most are
+    above) is vetoed, not just outvoted."""
+    eng = _engine(trend=-0.003)
+    ok, reason, _ = eng.decide(eng.checks(_strat(), BUY), min_net=0)
+    assert not ok and "VETO" in reason and "amplitud" in reason
+    ok, reason, _ = eng.decide(eng.checks(_strat(), SELL), min_net=0)
+    assert ok, reason

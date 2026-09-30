@@ -9,7 +9,8 @@ data) or -1 (against); some -1 are a VETO:
     tendencia diaria     1d close vs a rising / falling EMA-50
     tendencia 4h         same on 4h candles
     volatilidad          1d ATR in the top 10% of the last 180 days: against
-    amplitud             share of the traded coins above their 1d EMA-50
+    amplitud             share of the traded coins above their 1d EMA-50;
+                         going against most of the market is a VETO
   sentiment
     euforia / panico     Fear & Greed >= 80 or funding >= 0.05% / 8 h against
                          longs (<= 20, <= -0.03% against shorts)
@@ -142,9 +143,10 @@ class ConfirmationEngine:
         if len(states) < 3:
             return Check("amplitud", "analitico", 0, "pocas criptos con datos")
         frac = sum(states) / len(states)
-        vote = 1 if frac >= 0.6 else -1 if frac <= 0.4 else 0
-        return Check("amplitud", "analitico", vote * side,
-                     f"{sum(states)} de {len(states)} criptos sobre su EMA-50 diaria")
+        vote = (1 if frac >= 0.6 else -1 if frac <= 0.4 else 0) * side
+        return Check("amplitud", "analitico", vote,
+                     f"{sum(states)} de {len(states)} criptos sobre su EMA-50 diaria"
+                     + (" (contra la mayoria del mercado)" if vote < 0 else ""), veto=vote < 0)
 
     def _crowd(self, df, side) -> Check:
         fng, fund = _last(df, "fng"), _last(df, "funding_rate")
